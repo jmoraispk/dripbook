@@ -5,6 +5,7 @@ characters, and the Claude call is faked. One test reads the real Think Python
 PDF when pdfplumber is installed and converter/output/thinkpython2.pdf exists.
 """
 import contextlib
+import importlib.util
 import io
 import json
 import sys
@@ -511,6 +512,80 @@ class RenderTests(unittest.TestCase):
         self.assertIn("--ribbon:#F4B425", page)
 
 
+def book(*spec):
+    """Blocks from ("h1", "Title") / ("h2", "Title") / ("p", words) / ("code", "text") / ("li", words)."""
+    out, page = [], 1
+    for i, (kind, value) in enumerate(spec, 1):
+        b = {"id": f"p{page}.{i}", "page": page}
+        if kind in ("h1", "h2"):
+            b.update(type="heading", level=int(kind[1]), text=value)
+        elif kind == "code":
+            b.update(type="code", text=value)
+        elif kind == "li":
+            b.update(type="list_item", marker="•", level=1, text=filler(value))
+        elif kind == "toc":
+            b.update(type="paragraph", text=value)
+        else:
+            b.update(type="paragraph", text=filler(value) + (":" if kind == "p:" else ""))
+        out.append(b)
+    return out
+
+
+class SplitTests(unittest.TestCase):
+    def lessons(self, blocks, **kw):
+        plan = convert.split_by_headings(blocks, **kw)
+        self.assertEqual(convert.plan_errors(plan, blocks), [])
+        ids = {b["id"]: i for i, b in enumerate(blocks)}
+        return plan, [[b["id"] for b in blocks[ids[l["first_block"]]:ids[l["last_block"]] + 1]] for l in plan["lessons"]]
+
+    def test_short_sections_are_joined_and_chapters_start_lessons(self):
+        blocks = book(("h1", "Chapter 1"), ("p", 300), ("h2", "1.1 A"), ("p", 300), ("h2", "1.2 B"), ("p", 400),
+                      ("h2", "1.3 C"), ("p", 500), ("h1", "Chapter 2"), ("p", 600))
+        plan, groups = self.lessons(blocks)
+        self.assertEqual([l["subject"] for l in plan["lessons"]], ["Chapter 1", "1.3 C", "Chapter 2"])
+        self.assertEqual(plan["lessons"][0]["teaser"], "1.3 C")
+        self.assertEqual(plan["lessons"][-1]["teaser"], "")
+
+    def test_long_section_cut_between_paragraphs_not_before_code(self):
+        blocks = book(("h2", "Long"), ("p", 500), ("p:", 450), ("code", "x = 1"), ("p", 200), ("p", 500), ("p", 500))
+        plan, groups = self.lessons(blocks)
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(groups[0][-1], "p1.5", "the cut comes after the code and its explanation")
+        self.assertEqual(plan["lessons"][1]["subject"], "Long (continued)")
+
+    def test_lists_are_not_cut(self):
+        blocks = book(("h2", "List"), ("p", 600), *[("li", 100)] * 8, ("p", 500))
+        _, groups = self.lessons(blocks)
+        for g in groups[:-1]:
+            self.assertNotEqual(g[-1], "p1.3")
+        self.assertTrue(all(not (g[-1].startswith("p1.") and int(g[-1].split(".")[1]) in range(3, 10)) for g in groups))
+
+    def test_short_end_of_chapter_joins_previous_lesson(self):
+        blocks = book(("h1", "One"), ("p", 900), ("h2", "Exercises"), ("p", 150), ("h1", "Two"), ("p", 900))
+        plan, groups = self.lessons(blocks)
+        self.assertEqual([l["subject"] for l in plan["lessons"]], ["One", "Two"])
+
+    def test_contents_and_index_are_skipped(self):
+        toc = "1.1 What is a program? . . . . . . . . 1"
+        blocks = book(("h1", "Contents"), *[("toc", toc)] * 6, ("h1", "Chapter 1"), ("p", 700), ("h1", "Index"),
+                      ("p", 300))
+        for b in blocks[:7]:
+            b["page"] = 9
+        plan, groups = self.lessons(blocks)
+        self.assertEqual([s["reason"] for s in plan["skipped"]], ["table of contents", "index"])
+        self.assertEqual([l["subject"] for l in plan["lessons"]], ["Chapter 1"])
+
+
+class UrlTests(unittest.TestCase):
+    def test_spaced_urls_are_rejoined(self):
+        fix = lambda t: convert.SPACED_URL.sub(lambda m: "".join(m.group(0).split()), t)  # noqa: E731
+        self.assertEqual(fix("from https: // thinkpython. com/ code/ polygon. py ."),
+                         "from https://thinkpython.com/code/polygon.py .")
+        self.assertEqual(fix("See http: // en. wikipedia. org/ wiki/ Koch_ snowflake for more"),
+                         "See http://en.wikipedia.org/wiki/Koch_snowflake for more")
+        self.assertEqual(fix("Go to https://example.com. Then read on."), "Go to https://example.com. Then read on.")
+
+
 class FakeImage:
     width, height = 600, 150
 
@@ -585,11 +660,25 @@ class MainTests(unittest.TestCase):
                 code = convert.main([str(pdf), "--plan", str(tmp / "plan.json"), "--out", str(out), "--free", "1"])
             self.assertEqual(code, 0, stdout.getvalue())
             self.assertEqual(sorted(p.name for p in out.iterdir()),
-                             ["day-01.html", "day-01.txt", "lessons.json", "preview.html"])
+                             ["day-01.html", "day-01.txt", "day-02.html", "day-02.txt", "lessons.json", "preview.html"])
             course = json.loads((out / "lessons.json").read_text())
             self.assertEqual(course["book"]["slug"], "sample-book")
             self.assertEqual(course["planned_by"], "hand")
             self.assertEqual(len(course["lessons"]), 2)
+
+    def test_default_splits_by_headings_without_claude(self):
+        raw = sample_book()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "book.pdf").write_bytes(b"%PDF")
+            with mock.patch.object(convert, "read_pdf", return_value=raw), \
+                    mock.patch.dict(sys.modules, {"anthropic": None}), \
+                    contextlib.redirect_stdout(io.StringIO()) as stdout:
+                code = convert.main([str(tmp / "book.pdf"), "--out", str(tmp / "o"), "--title", "Sample"])
+            self.assertEqual(code, 0, stdout.getvalue())
+            course = json.loads((tmp / "o" / "lessons.json").read_text())
+            self.assertEqual(course["planned_by"], "headings")
+            self.assertEqual(course["lessons"][0]["subject"], "Chapter 1: Basics")
 
     def test_bad_plan_fails(self):
         raw = sample_book()
@@ -633,6 +722,17 @@ class ThinkPythonTests(unittest.TestCase):
         self.assertEqual(convert.plan_errors(plan, doc["blocks"]), [])
         code = {b["id"]: b["text"] for b in doc["blocks"] if b["type"] == "code"}
         self.assertIn("False      class      finally    is         return", "\n".join(code.values()))
+
+    @unittest.skipUnless(importlib.util.find_spec("pymupdf"), "needs pymupdf")
+    def test_engines_agree_on_the_sample(self):
+        pages = convert.parse_pages("23-38")
+        a = convert.extract(THINK_PYTHON, pages, "pdfplumber")
+        b = convert.extract(THINK_PYTHON, pages, "pymupdf")
+        plan_a = convert.split_by_headings(a["blocks"])
+        plan_b = convert.split_by_headings(b["blocks"])
+        self.assertEqual([l["subject"] for l in plan_a["lessons"]], [l["subject"] for l in plan_b["lessons"]])
+        code = lambda d: [x["text"] for x in d["blocks"] if x["type"] == "code"]  # noqa: E731
+        self.assertEqual(code(a), code(b))
 
     def test_every_captioned_figure_is_found(self):
         doc = convert.extract(THINK_PYTHON)

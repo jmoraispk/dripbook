@@ -1,28 +1,32 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["anthropic>=1.13", "pdfplumber>=0.11"]
+# dependencies = ["anthropic>=1.13", "pdfplumber>=0.11", "pymupdf>=1.24"]
 # ///
 """Turn a non-fiction ebook PDF, or just its free sample, into a Dripbook email course.
 
-The book is read locally into numbered blocks (headings, paragraphs, code, list
-items, figures). Claude chooses where each daily lesson starts and ends, by block
-number, and writes the subject line, an optional one-line lead-in and a one-line
-"Tomorrow:" teaser. Lesson text is always copied from the PDF, never from Claude,
-so every lesson is the author's own words. The script checks that the lessons
-cover the book in order with nothing left out, except ranges marked as skipped.
+Everything runs on this computer. The book is read into numbered blocks
+(headings, paragraphs, code, list items, figures), then split into daily lessons
+of a 3 to 5 minute read that start at the book's headings. Each lesson's subject
+is its heading, and lesson text is copied from the PDF unchanged. Figures are
+cropped out of the PDF as images. Each lesson becomes an HTML page that can be
+read in a browser or sent as an email, plus a plain-text version.
 
-  uv run converter/convert.py BOOK.pdf                          # plan with Claude, then render
-  uv run converter/convert.py https://example.com/sample.pdf    # same, from a URL
-  uv run converter/convert.py BOOK.pdf --pages 23-38            # use part of a PDF as the sample
-  uv run converter/convert.py BOOK.pdf --plan lessons.json      # render an existing plan; no API call
-  uv run converter/convert.py BOOK.pdf --blocks                 # print the numbered blocks (for writing a plan by hand)
-  uv run converter/convert.py BOOK.pdf --dry-run                # print the prompts without calling the API
+  uv run converter/convert.py BOOK.pdf                          # split by headings, then render
+  uv run converter/convert.py BOOK.pdf --pages 23-38            # use part of a PDF, e.g. skip the front matter
+  uv run converter/convert.py BOOK.pdf --engine pymupdf         # read the PDF with PyMuPDF instead of pdfplumber
+  uv run converter/convert.py BOOK.pdf --plan lessons.json      # render a plan you edited by hand
+  uv run converter/convert.py BOOK.pdf --blocks                 # print the numbered blocks a plan refers to
+  uv run converter/convert.py https://example.com/sample.pdf    # a URL works too
 
-Output goes to converter/output/<book-slug>/: lessons.json (the full plan), an
-email-ready HTML and a plain-text file for each of the first --free lessons, and
-preview.html, which shows the sequence. Planning needs ANTHROPIC_API_KEY (or an
-`ant auth login` profile); --plan, --blocks and --dry-run don't.
+extract_pdfplumber.py and extract_pymupdf.py run this with one reader each.
+
+Output goes to converter/output/<book-slug>/ (<book-slug>-pymupdf/ with PyMuPDF):
+lessons.json (the plan, with each lesson's text), day-01.html and day-01.txt for
+every lesson, figures/, and preview.html, which shows the sequence.
+
+--claude asks Claude to choose the lesson boundaries and write subject lines
+instead. It sends the book's text to Anthropic's API, so it is never on by default.
 """
 import argparse
 import hashlib
@@ -30,6 +34,7 @@ import html
 import json
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -61,6 +66,9 @@ NUMBERED_HEADING = re.compile(r"^(\d+(\.\d+)*|[A-Z](\.\d+)+)\.?\s+\S")
 FIGURE_CAPTION = re.compile(r"^(Figure|Fig\.|Diagram|Illustration|Image)\s+[A-Z]?\d+([.\-]\d+)*\s*[:.]\s")
 CAPTION = re.compile(r"^(Figure|Fig\.|Table|Listing|Diagram|Exhibit|Illustration|Image)\s+[\dA-Z]+([.\-]\d+)*\s*[:.]?", re.I)
 PAGE_NUMBER = re.compile(r"^\s*([0-9]{1,4}|[ivxlcdm]{1,7})\b|\b([0-9]{1,4}|[ivxlcdm]{1,7})\s*$", re.I)
+# A URL typeset with gaps after its punctuation, like "https: // site. com/ code/ x. py".
+SPACED_URL = re.compile(r"\b(?:https?|ftp): // ?[A-Za-z0-9-]+(?:(?:/ ?|_ ?|-|\. ?(?=[a-z0-9]))[A-Za-z0-9-]+)*/?")
+TOC_LINE = re.compile(r"(?:\.\s?){5,}\s*[0-9ivxlc]+\b")
 TERMINAL = re.compile(r"[.!?:;)\]\"”’]$")
 
 
@@ -98,6 +106,49 @@ def read_pdf(path, pages=None):
                         "chars": chars, "graphics": graphics, "images": images})
     return {"title": str(meta.get("Title") or "").strip(), "author": str(meta.get("Author") or "").strip(),
             "page_count": total, "pages": out}
+
+
+def read_pdf_pymupdf(path, pages=None):
+    """Same output as read_pdf(), read with PyMuPDF (MuPDF) instead of pdfplumber."""
+    import pymupdf
+    out = []
+    with pymupdf.open(path) as doc:
+        meta = doc.metadata or {}
+        total = doc.page_count
+        numbers = [n for n in (pages or range(1, total + 1)) if 1 <= n <= total]
+        for n in numbers:
+            p = doc[n - 1]
+            chars = []
+            for block in p.get_text("rawdict")["blocks"]:
+                for line in block.get("lines", []):
+                    if abs(line["dir"][0] - 1) > 0.01:
+                        continue  # rotated text: watermarks, margin notes
+                    for span in line["spans"]:
+                        font = span["font"]
+                        if span["flags"] & 8 and not MONO.search(font):
+                            font += "-Mono"      # MuPDF's monospace flag, for fonts named oddly
+                        for c in span["chars"]:
+                            x0, top, x1, _ = c["bbox"]
+                            chars.append((c["c"], x0, x1, top, c["origin"][1], span["size"], font))
+            graphics = []
+            for path_ in p.get_drawings():
+                for item in path_["items"]:
+                    points = [v for v in item[1:] if hasattr(v, "x")]
+                    rects = [v for v in item[1:] if hasattr(v, "x0")]
+                    xs = [q.x for q in points] + [v for r in rects for v in (r.x0, r.x1)]
+                    ys = [q.y for q in points] + [v for r in rects for v in (r.y0, r.y1)]
+                    if not xs:
+                        continue
+                    kind = {"c": "curve", "l": "line"}.get(item[0], "rect")
+                    graphics.append((min(xs), min(ys), max(xs), max(ys), kind))
+            images = [tuple(i["bbox"]) for i in p.get_image_info()]
+            out.append({"number": n, "width": float(p.rect.width), "height": float(p.rect.height),
+                        "chars": chars, "graphics": graphics, "images": images})
+    return {"title": str(meta.get("title") or "").strip(), "author": str(meta.get("author") or "").strip(),
+            "page_count": total, "pages": out}
+
+
+ENGINES = ("pdfplumber", "pymupdf")
 
 
 def lines_from_chars(chars):
@@ -554,6 +605,8 @@ def finish_blocks(blocks):
                 rows.append(" " * max(0, round((l["rel"] - base) / char_width(l))) + l["text"].rstrip())
             b["text"] = "\n".join(rows).strip("\n")
         if "runs" in b:
+            for r in b["runs"]:
+                r[0] = SPACED_URL.sub(lambda m: re.sub(r"\s+", "", m.group(0)), r[0])
             runs = [r for r in b["runs"] if r[0]]
             if runs:
                 runs[0][0] = runs[0][0].lstrip()
@@ -598,9 +651,10 @@ def char_width(line):
     return max((line["x1"] - line["x0"]) / n, 1.0) if n else 6.0
 
 
-def extract(path, pages=None):
+def extract(path, pages=None, engine="pdfplumber"):
     """Read a PDF into blocks. Returns {"title", "author", "page_count", "pages", "blocks", "warnings"}."""
-    return parse(read_pdf(path, pages))
+    reader = read_pdf_pymupdf if engine == "pymupdf" else read_pdf
+    return parse(reader(path, pages))
 
 
 def parse(raw):
@@ -680,6 +734,121 @@ def chunk_blocks(blocks, max_words):
 
     levels = sorted({b["level"] for b in blocks if b["type"] == "heading"})
     return [c for c in split(blocks, levels) if c]
+
+
+# --------------------------------------------------- splitting by headings
+
+def heading_label(text):
+    return ": ".join(part.strip() for part in text.split("\n") if part.strip())
+
+
+def split_by_headings(blocks, target=900, most=1300, least=450):
+    """A lesson plan made by rules alone: no model, nothing leaves this computer.
+
+    Lessons start at headings and run about `target` words (220 words is a minute).
+    Short sections are joined; a section longer than `most` words is cut between
+    paragraphs, never inside a list or between code and the sentence introducing it.
+    A new chapter always starts a new lesson; a short end of the chapter before it
+    joins that chapter's previous lesson when it fits. Contents pages and the
+    index are skipped. Each lesson's subject is its first heading, and its teaser names the
+    next lesson.
+    """
+    leaders = Counter()   # a contents page is full of dot leaders: "14.6 Databases . . . . 141"
+    for b in blocks:
+        leaders[b["page"]] += len(TOC_LINE.findall(b.get("text", "")))
+    index_at = next((i for i, b in enumerate(blocks) if b["type"] == "heading" and b["level"] == 1
+                     and b["text"].strip().lower() == "index"), len(blocks))
+    skipped, segments, kept = [], [], []
+    for i, b in enumerate(blocks[:index_at]):
+        if leaders[b["page"]] >= 5:
+            if skipped and i > 0 and skipped[-1]["last_block"] == blocks[i - 1]["id"]:
+                skipped[-1]["last_block"] = b["id"]
+            else:
+                skipped.append({"first_block": b["id"], "last_block": b["id"], "reason": "table of contents"})
+            if kept:
+                segments.append(kept)
+                kept = []
+        else:
+            kept.append(b)
+    if kept:
+        segments.append(kept)
+    if index_at < len(blocks):   # the index is the last thing in a book, and no use in a daily email
+        skipped.append({"first_block": blocks[index_at]["id"], "last_block": blocks[-1]["id"], "reason": "index"})
+
+    lessons, last_heading = [], ""
+    for group in (g for segment in segments for g in lesson_groups(segment, target, most, least)):
+        first = next((b for b in group if b["type"] == "heading"), None)
+        if group[0]["type"] == "heading":
+            subject = heading_label(group[0]["text"])
+        elif last_heading:
+            subject = f"{last_heading} (continued)"
+        else:
+            subject = heading_label(first["text"]) if first else "Introduction"
+        for b in group:
+            if b["type"] == "heading":
+                last_heading = heading_label(b["text"])
+        lessons.append({"first_block": group[0]["id"], "last_block": group[-1]["id"],
+                        "subject": subject[:MAX_SUBJECT], "lead_in": "", "teaser": ""})
+    for lesson, following in zip(lessons, lessons[1:]):
+        lesson["teaser"] = following["subject"][:MAX_LINE]
+    return {"lessons": lessons, "skipped": skipped, "cta_note": "", "planned_by": "headings"}
+
+
+def lesson_groups(blocks, target, most, least):
+    """Consecutive blocks grouped into lessons; see split_by_headings()."""
+    def words(seq):
+        return sum(block_words(b) for b in seq)
+
+    def can_end_after(seq, i):
+        b, nxt = seq[i], seq[i + 1] if i + 1 < len(seq) else None
+        if nxt is None:
+            return True
+        if b["type"] in ("heading", "code") or nxt["type"] in ("code", "figure"):
+            return False   # keep a heading with its text, and code with the words around it
+        if b["type"] == "list_item" and nxt["type"] == "list_item":
+            return False
+        return not b.get("text", "").rstrip().endswith(":")
+
+    sections, current = [], []
+    for b in blocks:
+        if b["type"] == "heading" and current and any(x["type"] != "heading" for x in current):
+            sections.append(current)
+            current = []
+        current.append(b)
+    if current:
+        sections.append(current)
+
+    pieces = []
+    for section in sections:
+        if words(section) <= most:
+            pieces.append(section)
+            continue
+        piece = []
+        for i, b in enumerate(section):
+            piece.append(b)
+            if words(piece) >= target and words(section[i + 1:]) >= least and can_end_after(section, i):
+                pieces.append(piece)
+                piece = []
+        if piece:
+            pieces.append(piece)
+
+    groups, current = [], []
+    for piece in pieces:
+        chapter = piece[0]["type"] == "heading" and piece[0]["level"] == 1
+        if current and chapter and words(current) < least and groups \
+                and words(groups[-1]) + words(current) <= most * 1.2:
+            groups[-1] += current   # a short end of a chapter joins the lesson before it
+            current = []
+        if current and (words(current) >= target or words(current) + words(piece) > most or chapter):
+            groups.append(current)
+            current = []
+        current += piece
+    if current:
+        if groups and words(current) < least / 2 and words(groups[-1]) + words(current) <= most * 1.2:
+            groups[-1] += current   # a few stray paragraphs at the end join the last lesson
+        else:
+            groups.append(current)
+    return groups
 
 
 # --------------------------------------------------------------- the plan
@@ -818,7 +987,7 @@ def build_course(raw, doc, settings):
     return course, []
 
 
-def render_figures(course, pdf_path, out_dir, resolution=200, crop_image=None):
+def render_figures(course, pdf_path, out_dir, resolution=200, crop_image=None, engine="pdfplumber"):
     """Save every figure in the course as a PNG cropped from the PDF, in out_dir/figures/.
 
     Drawings are rendered from the PDF's vectors at `resolution` DPI, so they stay sharp
@@ -835,7 +1004,22 @@ def render_figures(course, pdf_path, out_dir, resolution=200, crop_image=None):
         return
     folder.mkdir(parents=True, exist_ok=True)
     pdf = None
-    if crop_image is None:
+    if crop_image is None and engine == "pymupdf":
+        import pymupdf
+        pdf = pymupdf.open(pdf_path)
+
+        class Pixmap:  # gives PyMuPDF's pixmap the PIL-style interface used below
+            def __init__(self, pix):
+                self.pix, self.width, self.height = pix, pix.width, pix.height
+
+            def save(self, path, **_):
+                self.pix.save(str(path))
+
+        def crop_image(number, box):
+            page = pdf[number - 1]
+            clip = pymupdf.Rect(box) & page.rect
+            return Pixmap(page.get_pixmap(clip=clip, dpi=resolution))
+    elif crop_image is None:
         import pdfplumber
         pdf = pdfplumber.open(pdf_path)
 
@@ -1364,8 +1548,8 @@ def preview_html(course, emails):
     rows = []
     for l in lessons:
         locked = l["day"] > free
-        tag = "a" if not locked else "div"
-        href = f' href="#day-{l["day"]}"' if not locked else ""
+        tag = "a"
+        href = f' href="day-{l["day"]:02d}.html"' if locked else f' href="#day-{l["day"]}"'
         extra = '<span class="lock">After purchase</span>' if locked else ""
         rows.append(f'<{tag} class="row{" row-locked" if locked else ""}"{href}><span class="day">Day {l["day"]}</span>'
                     f'<span class="row-text"><span class="subject">{esc(l["subject"])}</span>'
@@ -1479,7 +1663,7 @@ def write_outputs(course, out_dir):
         old.unlink()
     (out_dir / "lessons.json").write_text(json.dumps(course, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     emails = {}
-    for lesson in course["lessons"][:course["settings"]["free_lessons"]]:
+    for lesson in course["lessons"]:
         stem = f"day-{lesson['day']:02d}"
         emails[lesson["day"]] = email_html(lesson, course)
         (out_dir / f"{stem}.html").write_text(emails[lesson["day"]], encoding="utf-8")
@@ -1540,9 +1724,15 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("source", help="PDF file or URL")
     parser.add_argument("--pages", type=parse_pages, help="pages to use, e.g. 23-38 (default: all)")
-    parser.add_argument("--plan", help="render this plan (a lessons.json) instead of asking Claude")
-    parser.add_argument("--free", type=int, default=3, help="free lessons to render as emails (default: 3)")
-    parser.add_argument("--out", help="output folder (default: converter/output/<book-slug>)")
+    parser.add_argument("--engine", choices=sorted(ENGINES), default="pdfplumber",
+                        help="library that reads the PDF (default: pdfplumber)")
+    parser.add_argument("--plan", help="render this plan (a lessons.json) instead of splitting by headings")
+    parser.add_argument("--target-words", type=int, default=900,
+                        help="words per lesson when splitting by headings (default: 900, about 4 minutes)")
+    parser.add_argument("--free", type=int, default=3,
+                        help="free lessons; the last one ends with the call to action (default: 3)")
+    parser.add_argument("--out", help="output folder (default: converter/output/<book-slug>, "
+                                      "or <book-slug>-pymupdf with --engine pymupdf)")
     parser.add_argument("--title", help="book title, if the PDF doesn't say")
     parser.add_argument("--author", help="author name, if the PDF doesn't say")
     parser.add_argument("--price", type=int, default=49, help="course price in USD for the call to action (default: 49)")
@@ -1550,21 +1740,27 @@ def main(argv=None):
     parser.add_argument("--image-base-url", default="",
                         help="public URL the figures/ folder will be uploaded to, e.g. a Vercel Blob prefix "
                              "(default: relative links, which work for local previews)")
-    parser.add_argument("--model", default="claude-opus-5-5", choices=MODELS)
-    parser.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
-    parser.add_argument("--chunk-words", type=int, default=12000, help="words per planning request (default: 12000)")
     parser.add_argument("--blocks", action="store_true", help="print the numbered blocks and exit")
-    parser.add_argument("--dry-run", action="store_true", help="print the planning prompts and exit")
+    claude = parser.add_argument_group("planning with Claude (off unless --claude; sends the book's text to Anthropic)")
+    claude.add_argument("--claude", action="store_true", help="let Claude choose lesson boundaries and subject lines")
+    claude.add_argument("--model", default="claude-opus-5-5", choices=MODELS)
+    claude.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
+    claude.add_argument("--chunk-words", type=int, default=12000, help="words per planning request (default: 12000)")
+    claude.add_argument("--dry-run", action="store_true", help="print the planning prompts and exit")
     args = parser.parse_args(argv)
     if args.free < 1:
         parser.error("--free must be at least 1")
 
+    if args.dry_run and not args.claude:
+        parser.error("--dry-run only applies with --claude")
+
     pdf, url = fetch(args.source)
-    print(f"Reading {pdf}")
-    doc = extract(pdf, args.pages)
+    print(f"Reading {pdf} with {args.engine}")
+    started = time.monotonic()
+    doc = extract(pdf, args.pages, args.engine)
     words = sum(map(block_words, doc["blocks"]))
     print(f"  {len(doc['blocks'])} blocks, {words:,} words, pages {doc['pages'][0]}–{doc['pages'][1]} "
-          f"of {doc['page_count']}" if doc["pages"] else "  no pages")
+          f"of {doc['page_count']}, in {time.monotonic() - started:.1f}s" if doc["pages"] else "  no pages")
     for w in doc["warnings"]:
         print(f"  warning: {w}")
     if args.blocks:
@@ -1574,13 +1770,18 @@ def main(argv=None):
         return 1
 
     sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
-    source = {"file": pdf.name, "url": url, "sha256": sha, "pages": doc["pages"], "page_count": doc["page_count"]}
+    source = {"file": pdf.name, "url": url, "sha256": sha, "pages": doc["pages"], "page_count": doc["page_count"],
+              "engine": args.engine}
     book = {"title": args.title or doc["title"], "author": args.author or doc["author"]}
     if args.plan:
         raw = json.loads(Path(args.plan).read_text(encoding="utf-8"))
         old = (raw.get("source") or {}).get("sha256")
         if old and old != sha:
             print("  warning: the plan was made from a different PDF file; checking it against this one")
+    elif not args.claude:
+        raw = split_by_headings(doc["blocks"], target=args.target_words, most=round(args.target_words * 1.45),
+                                least=round(args.target_words / 2))
+        raw["book"] = book
     else:
         print("Planning lessons with Claude")
         import anthropic
@@ -1606,15 +1807,16 @@ def main(argv=None):
         print("The plan doesn't fit this PDF:", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
-        if not args.plan:
+        if args.claude and not args.plan:
             rejected = DEFAULT_OUT / slugify(book["title"] or pdf.stem) / "rejected-plan.json"
             rejected.parent.mkdir(parents=True, exist_ok=True)
             rejected.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             print(f"Saved it to {rejected}; fix it and pass it back with --plan.", file=sys.stderr)
         return 1
 
-    out_dir = Path(args.out) if args.out else DEFAULT_OUT / course["book"]["slug"]
-    render_figures(course, pdf, out_dir)
+    suffix = "" if args.engine == "pdfplumber" else f"-{args.engine}"
+    out_dir = Path(args.out) if args.out else DEFAULT_OUT / (course["book"]["slug"] + suffix)
+    render_figures(course, pdf, out_dir, engine=args.engine)
     write_outputs(course, out_dir)
     s = course["summary"]
     print(f"\n{course['book']['title']}: {s['lessons']} lessons, {s['words']:,} words "
@@ -1629,8 +1831,8 @@ def main(argv=None):
               f"({f['reason']})")
     for w in course["warnings"]:
         print(f"  warning: {w}")
-    print(f"\nWrote {out_dir}/: lessons.json, preview.html and {course['settings']['free_lessons']} emails "
-          "(.html and .txt)")
+    print(f"\nWrote {out_dir}/: preview.html, lessons.json, and day-01.html to "
+          f"day-{len(course['lessons']):02d}.html with a .txt for each")
     return 0
 
 

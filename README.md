@@ -84,28 +84,38 @@ A full run makes a few hundred web searches and fetches on Claude Opus 5.5. A ro
 
 ## Converter
 
-`converter/convert.py` turns a non-fiction ebook PDF, or just its free sample, into a Dripbook course and renders a preview to send privately to the author. Lessons are excerpts of the book, never rewrites: Claude only decides where each lesson starts and ends and writes the subject line, an optional one-line lead-in and a one-line "Tomorrow:" teaser. The script copies the lesson text from the PDF itself and checks that the lessons cover the book in order, so nothing is invented or silently dropped. Code blocks, lists and headings keep their exact text and indentation. Figures (diagrams drawn in the PDF and embedded images) are cropped out as sharp PNGs with the book's caption underneath. Any caption that has no figure found next to it is reported, so missed figures don't go unnoticed.
+`converter/convert.py` turns a non-fiction ebook PDF, or just its free sample, into daily lessons: one HTML page per day that reads well in a browser and can be sent as an email, plus a plain-text version. Everything runs on your computer, and the book's text is never sent anywhere.
+
+- Lessons start at the book's headings and run 3 to 5 minutes (`--target-words`, default 900). Short sections are joined. Long sections are cut between paragraphs, never inside a list or between code and the sentence introducing it. Each new chapter starts a new lesson.
+- Each lesson's subject is its heading, and its "Tomorrow:" line names the next lesson. Lesson text is copied from the PDF unchanged. Code keeps its exact indentation.
+- Figures (drawn diagrams and embedded images) are cropped out as PNGs with the book's caption underneath. A caption with no figure found next to it is reported.
+- The table of contents and the index are skipped. Use `--pages` to skip other front matter, such as title pages.
+
+There are two ways to read the PDF, so they can be compared on the same book:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-uv run converter/convert.py sample.pdf                     # plan with Claude, then render
-uv run converter/convert.py https://example.com/book.pdf --pages 23-38   # a URL, and only some pages
+uv run converter/extract_pymupdf.py book.pdf               # PyMuPDF: about 2.5x faster
+uv run converter/extract_pdfplumber.py book.pdf            # pdfplumber
+uv run converter/extract_pymupdf.py book.pdf --pages 23-60 # only some pages
 ```
 
-Results go to `converter/output/<book-slug>/`, which git ignores:
+On all of Think Python (244 pages), both readers make the same 68 lessons and 27 figures, and their text differs in 12 places out of about 3,150 blocks, mostly where a paragraph breaks. PyMuPDF takes 4.4 s instead of 11.3 s and decodes a few characters pdfplumber can't. PyMuPDF is AGPL licensed: fine for running it ourselves, but check the licence before building it into a product.
 
-- `lessons.json`: the whole plan, with every lesson's text, read time and pages, plus figures that weren't carried over, skipped pages and warnings
-- `day-01.html`, `day-01.txt`, ...: the free lessons (`--free`, default 3) as email-ready HTML and plain text. The last free one ends with the "continue the course" button (`--price`, `--cta-url`). `{{CHECKOUT_URL}}` and `{{UNSUBSCRIBE_URL}}` are placeholders for whatever sends the emails.
-- `preview.html`: the lesson sequence and the free emails in one page, in the landing page's style
-- `figures/`: one PNG per figure. Emails link to them as `figures/…` by default, which works for local previews. For sending, upload the folder (to Vercel Blob, per `docs/email-delivery.md`) and render with `--image-base-url https://…/<book-slug>/` so the links are public.
+Results go to `converter/output/<book-slug>/` with pdfplumber, or `<book-slug>-pymupdf/` with PyMuPDF. Git ignores both.
 
-To render without the API, pass a plan. `lessons.json` from an earlier run works, so you can edit subjects or move split points and render again. `converter/examples/think-python.plan.json` is a hand-made plan for chapters 1 and 2 of [Think Python](https://greenteapress.com/thinkpython2/thinkpython2.pdf) (CC BY-NC):
+- `preview.html`: the whole sequence. The free lessons (`--free`, default 3) are shown inline, and every other lesson links to its page.
+- `day-01.html`, `day-01.txt`, ...: every lesson, as an HTML page and as plain text. The last free one ends with a "continue the course" button (`--price`, `--cta-url`). `{{CHECKOUT_URL}}` and `{{UNSUBSCRIBE_URL}}` are placeholders for whatever sends the emails.
+- `figures/`: one PNG per figure. Pages link to them as `figures/…`. If the pages are hosted somewhere else, pass `--image-base-url https://…/` so the links point there.
+- `lessons.json`: the plan, with every lesson's text, read time and pages, plus skipped pages and warnings.
+
+To change the split, edit `lessons.json` (subjects, or where lessons start and end) and render it again with `--plan`. `converter/examples/think-python.plan.json` is a hand-made plan for chapters 1 and 2 of [Think Python](https://greenteapress.com/thinkpython2/thinkpython2.pdf) (CC BY-NC):
 
 ```bash
 uv run converter/convert.py converter/output/thinkpython2.pdf --pages 23-38 --plan converter/examples/think-python.plan.json
 uv run converter/convert.py book.pdf --blocks              # list the numbered blocks a plan refers to
-uv run converter/convert.py book.pdf --dry-run             # show the prompts without calling the API
 python3 -m unittest discover -s converter                  # offline tests
 ```
 
-Long books are planned one chapter-sized part at a time (`--chunk-words`, default 12,000), so a whole book costs about one pass over its text in input tokens. Not measured yet: try a sample first. Known limits: scanned PDFs (no OCR), two-column layouts, and math formulas, which come out as plain text.
+`--claude` lets Claude choose the lesson boundaries and write subject lines instead. It sends the book's text to Anthropic's API, so it is never used unless you ask for it.
+
+Known limits: scanned PDFs (no OCR), two-column layouts, and math formulas, which come out as plain text.
