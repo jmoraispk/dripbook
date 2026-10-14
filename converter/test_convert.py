@@ -503,6 +503,8 @@ class RenderTests(unittest.TestCase):
         email = convert.email_html(self.course["lessons"][0], self.course)
         page = convert.preview_html(self.course, {1: email})
         self.assertEqual(page.count("<iframe"), 1)
+        self.assertIn('role="tab" id="tab-1"', page)
+        self.assertNotIn("function fit", page)
         self.assertIn("row-locked", page)
         self.assertIn("Second", page)
         self.assertIn("Figure 1.1: Boxes. (page 2)", page)

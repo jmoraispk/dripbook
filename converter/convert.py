@@ -1327,15 +1327,21 @@ a.row:hover .subject{text-decoration:underline}
 .row-locked .day{background:var(--ribbon);color:var(--on-ribbon)}
 .lock{font-size:13px;font-weight:700;color:var(--muted)}
 .section{padding-block:56px;display:flex;flex-direction:column;gap:28px}
-.lesson{display:flex;flex-direction:column;gap:14px;padding-top:24px;border-top:1.5px solid var(--rule)}
+.lesson{display:flex;flex-direction:column;gap:14px}
 .lesson-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
 .lesson-head h3{margin:0;font-size:22px;font-weight:800;letter-spacing:-.01em}
 .meta{font-size:15px;color:var(--muted)}
 .pills{display:flex;gap:8px}
 .pill{min-height:40px;padding:0 16px;border-radius:999px;border:1.5px solid var(--rule);background:var(--surface);color:var(--ink);font:inherit;font-size:15px;font-weight:600;cursor:pointer}
 .pill[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.tabs{display:flex;flex-wrap:wrap;gap:8px;border-bottom:1.5px solid var(--rule);padding-bottom:16px}
+.tab{min-height:48px;padding:0 22px;border-radius:999px;border:1.5px solid var(--rule);background:var(--surface);color:var(--ink);font:inherit;font-size:16px;font-weight:700;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.tab:focus-visible,.pill:focus-visible{outline:3px solid var(--ribbon);outline-offset:2px}
+.panels{position:relative}
+.lesson.off{position:absolute;inset:0 0 auto 0;visibility:hidden;pointer-events:none}
 .frame{display:flex;justify-content:center}
-iframe{width:100%;max-width:100%;border:1.5px solid var(--line);border-radius:16px;background:#EFF2F7;transition:width .2s}
+iframe{display:block;width:100%;max-width:100%;height:min(78vh,900px);border:1.5px solid var(--line);border-radius:16px;background:#EFF2F7;transition:width .2s}
 .notes{display:flex;flex-direction:column;gap:14px;max-width:44em}
 .notes p,.notes li{margin:0;font-size:17px;line-height:1.6;color:var(--muted)}
 .notes ul{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:6px}
@@ -1367,11 +1373,12 @@ def preview_html(course, emails):
                     f'<span class="mins">{l["minutes"]:g} min</span></{tag}>')
     frames = []
     for l in lessons[:free]:
-        frames.append(f"""<article class="lesson" id="day-{l["day"]}">
+        off = "" if l["day"] == lessons[0]["day"] else " off"
+        frames.append(f"""<article class="lesson{off}" id="day-{l["day"]}" role="tabpanel" aria-labelledby="tab-{l["day"]}">
 <div class="lesson-head"><div><h3>Day {l["day"]}: {esc(l["subject"])}</h3>
 <span class="meta">{l["words"]:,} words, about {l["minutes"]:g} minutes. From pages {l["pages"][0]}–{l["pages"][1]}.</span></div>
 <div class="pills" role="group" aria-label="Width"><button type="button" class="pill" data-width="100%" aria-pressed="true">Desktop</button><button type="button" class="pill" data-width="390px" aria-pressed="false">Phone</button></div></div>
-<div class="frame"><iframe title="Day {l["day"]} email" loading="lazy" srcdoc="{esc(emails[l["day"]])}"></iframe></div>
+<div class="frame"><iframe title="Day {l["day"]} email" srcdoc="{esc(emails[l["day"]])}"></iframe></div>
 </article>""")
     notes = [f"<p>Every lesson is an excerpt of {esc(book['title'])}, copied from the PDF without edits. "
              f"The only added words are each email's subject line, the short italic intro, the "
@@ -1418,7 +1425,11 @@ def preview_html(course, emails):
 </section>
 <section class="wrap section">
 <h2>The free lessons, as readers get them</h2>
-{"".join(frames)}
+<div class="tabs" role="tablist" aria-label="Free lessons">{"".join(
+    f'<button type="button" class="tab" role="tab" id="tab-{l["day"]}" aria-controls="day-{l["day"]}" '
+    f'aria-selected="{str(i == 0).lower()}"{"" if i == 0 else " tabindex=\"-1\""}>Day {l["day"]}</button>'
+    for i, l in enumerate(lessons[:free]))}</div>
+<div class="panels">{"".join(frames)}</div>
 </section>
 <section class="wrap section notes">
 <h2>How this preview was made</h2>
@@ -1427,13 +1438,33 @@ def preview_html(course, emails):
 </main>
 <footer><div class="wrap">Made with Dripbook. This page is private and not listed anywhere.</div></footer>
 <script>
-function fit(f){{try{{f.style.height=f.contentDocument.documentElement.scrollHeight+'px'}}catch(e){{}}}}
-document.querySelectorAll('iframe').forEach(function(f){{f.addEventListener('load',function(){{fit(f);setTimeout(function(){{fit(f)}},600)}})}});
+var tabs=[].slice.call(document.querySelectorAll('.tab'));
+function show(day,focus){{
+  tabs.forEach(function(t){{
+    var on=t.getAttribute('aria-controls')==='day-'+day;
+    t.setAttribute('aria-selected',String(on));t.tabIndex=on?0:-1;
+    document.getElementById(t.getAttribute('aria-controls')).classList.toggle('off',!on);
+    if(on&&focus)t.focus();
+  }});
+}}
+tabs.forEach(function(t,i){{
+  t.addEventListener('click',function(){{show(t.id.slice(4))}});
+  t.addEventListener('keydown',function(e){{
+    var d=e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0;
+    if(d){{e.preventDefault();show(tabs[(i+d+tabs.length)%tabs.length].id.slice(4),true)}}
+  }});
+}});
+document.querySelectorAll('a.row[href^="#day-"]').forEach(function(a){{
+  a.addEventListener('click',function(e){{
+    e.preventDefault();show(a.getAttribute('href').slice(5));
+    document.querySelector('.tabs').scrollIntoView({{behavior:'smooth',block:'start'}});
+  }});
+}});
 document.querySelectorAll('.lesson').forEach(function(a){{
   var f=a.querySelector('iframe');
   a.querySelectorAll('.pill').forEach(function(b){{b.addEventListener('click',function(){{
     a.querySelectorAll('.pill').forEach(function(x){{x.setAttribute('aria-pressed',String(x===b))}});
-    f.style.width=b.dataset.width;setTimeout(function(){{fit(f)}},250);
+    f.style.width=b.dataset.width;
   }})}});
 }});
 </script>

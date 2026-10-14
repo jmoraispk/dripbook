@@ -42,15 +42,21 @@ a.row:hover .subject{text-decoration:underline}
 .row-locked .day{background:var(--ribbon);color:var(--on-ribbon)}
 .lock{font-size:13px;font-weight:700;color:var(--muted)}
 .section{padding-block:56px;display:flex;flex-direction:column;gap:28px}
-.lesson{display:flex;flex-direction:column;gap:14px;padding-top:24px;border-top:1.5px solid var(--rule)}
+.lesson{display:flex;flex-direction:column;gap:14px}
 .lesson-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
 .lesson-head h3{margin:0;font-size:22px;font-weight:800;letter-spacing:-.01em}
 .meta{font-size:15px;color:var(--muted)}
 .pills{display:flex;gap:8px}
 .pill{min-height:40px;padding:0 16px;border-radius:999px;border:1.5px solid var(--rule);background:var(--surface);color:var(--ink);font:inherit;font-size:15px;font-weight:600;cursor:pointer}
 .pill[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.tabs{display:flex;flex-wrap:wrap;gap:8px;border-bottom:1.5px solid var(--rule);padding-bottom:16px}
+.tab{min-height:48px;padding:0 22px;border-radius:999px;border:1.5px solid var(--rule);background:var(--surface);color:var(--ink);font:inherit;font-size:16px;font-weight:700;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.tab:focus-visible,.pill:focus-visible{outline:3px solid var(--ribbon);outline-offset:2px}
+.panels{position:relative}
+.lesson.off{position:absolute;inset:0 0 auto 0;visibility:hidden;pointer-events:none}
 .frame{display:flex;justify-content:center}
-iframe{width:100%;max-width:100%;border:1.5px solid var(--line);border-radius:16px;background:#EFF2F7;transition:width .2s}
+iframe{display:block;width:100%;max-width:100%;height:min(78vh,900px);border:1.5px solid var(--line);border-radius:16px;background:#EFF2F7;transition:width .2s}
 .notes{display:flex;flex-direction:column;gap:14px;max-width:44em}
 .notes p,.notes li{margin:0;font-size:17px;line-height:1.6;color:var(--muted)}
 .notes ul{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:6px}
@@ -73,11 +79,12 @@ footer{border-top:1.5px solid var(--rule);padding-block:28px;font-size:15px;colo
 </section>
 <section class="wrap section">
 <h2>The free lessons, as readers get them</h2>
-<article class="lesson" id="day-1">
+<div class="tabs" role="tablist" aria-label="Free lessons"><button type="button" class="tab" role="tab" id="tab-1" aria-controls="day-1" aria-selected="true">Day 1</button><button type="button" class="tab" role="tab" id="tab-2" aria-controls="day-2" aria-selected="false" tabindex="-1">Day 2</button><button type="button" class="tab" role="tab" id="tab-3" aria-controls="day-3" aria-selected="false" tabindex="-1">Day 3</button></div>
+<div class="panels"><article class="lesson" id="day-1" role="tabpanel" aria-labelledby="tab-1">
 <div class="lesson-head"><div><h3>Day 1: The way of the program</h3>
 <span class="meta">767 words, about 3.5 minutes. From pages 23–24.</span></div>
 <div class="pills" role="group" aria-label="Width"><button type="button" class="pill" data-width="100%" aria-pressed="true">Desktop</button><button type="button" class="pill" data-width="390px" aria-pressed="false">Phone</button></div></div>
-<div class="frame"><iframe title="Day 1 email" loading="lazy" srcdoc="&lt;!DOCTYPE html&gt;
+<div class="frame"><iframe title="Day 1 email" srcdoc="&lt;!DOCTYPE html&gt;
 &lt;html lang=&quot;en&quot; xmlns=&quot;http://www.w3.org/1999/xhtml&quot; xmlns:o=&quot;urn:schemas-microsoft-com:office:office&quot;&gt;
 &lt;head&gt;
 &lt;meta charset=&quot;utf-8&quot;&gt;
@@ -152,11 +159,11 @@ From &lt;em&gt;Think Python by Allen B. Downey&lt;/em&gt;. Lesson 1 of 6.&lt;br&
 &lt;/body&gt;
 &lt;/html&gt;
 "></iframe></div>
-</article><article class="lesson" id="day-2">
+</article><article class="lesson off" id="day-2" role="tabpanel" aria-labelledby="tab-2">
 <div class="lesson-head"><div><h3>Day 2: Hello, World! Values, types and formal languages</h3>
 <span class="meta">1,164 words, about 5.3 minutes. From pages 25–28.</span></div>
 <div class="pills" role="group" aria-label="Width"><button type="button" class="pill" data-width="100%" aria-pressed="true">Desktop</button><button type="button" class="pill" data-width="390px" aria-pressed="false">Phone</button></div></div>
-<div class="frame"><iframe title="Day 2 email" loading="lazy" srcdoc="&lt;!DOCTYPE html&gt;
+<div class="frame"><iframe title="Day 2 email" srcdoc="&lt;!DOCTYPE html&gt;
 &lt;html lang=&quot;en&quot; xmlns=&quot;http://www.w3.org/1999/xhtml&quot; xmlns:o=&quot;urn:schemas-microsoft-com:office:office&quot;&gt;
 &lt;head&gt;
 &lt;meta charset=&quot;utf-8&quot;&gt;
@@ -273,11 +280,11 @@ From &lt;em&gt;Think Python by Allen B. Downey&lt;/em&gt;. Lesson 2 of 6.&lt;br&
 &lt;/body&gt;
 &lt;/html&gt;
 "></iframe></div>
-</article><article class="lesson" id="day-3">
+</article><article class="lesson off" id="day-3" role="tabpanel" aria-labelledby="tab-3">
 <div class="lesson-head"><div><h3>Day 3: Debugging, plus the Chapter 1 glossary and exercises</h3>
 <span class="meta">821 words, about 3.7 minutes. From pages 28–30.</span></div>
 <div class="pills" role="group" aria-label="Width"><button type="button" class="pill" data-width="100%" aria-pressed="true">Desktop</button><button type="button" class="pill" data-width="390px" aria-pressed="false">Phone</button></div></div>
-<div class="frame"><iframe title="Day 3 email" loading="lazy" srcdoc="&lt;!DOCTYPE html&gt;
+<div class="frame"><iframe title="Day 3 email" srcdoc="&lt;!DOCTYPE html&gt;
 &lt;html lang=&quot;en&quot; xmlns=&quot;http://www.w3.org/1999/xhtml&quot; xmlns:o=&quot;urn:schemas-microsoft-com:office:office&quot;&gt;
 &lt;head&gt;
 &lt;meta charset=&quot;utf-8&quot;&gt;
@@ -360,7 +367,7 @@ From &lt;em&gt;Think Python by Allen B. Downey&lt;/em&gt;. Lesson 3 of 6.&lt;br&
 &lt;/body&gt;
 &lt;/html&gt;
 "></iframe></div>
-</article>
+</article></div>
 </section>
 <section class="wrap section notes">
 <h2>How this preview was made</h2>
@@ -369,13 +376,33 @@ From &lt;em&gt;Think Python by Allen B. Downey&lt;/em&gt;. Lesson 3 of 6.&lt;br&
 </main>
 <footer><div class="wrap">An example made with Dripbook from chapters 1 and 2 of <a href="https://greenteapress.com/wp/think-python-2e/">Think Python, 2nd edition</a>, by Allen B. Downey, licensed <a href="https://creativecommons.org/licenses/by-nc/3.0/">CC BY-NC 3.0</a>. <a href="../think-python/">See the course sales page</a>.</div></footer>
 <script>
-function fit(f){try{f.style.height=f.contentDocument.documentElement.scrollHeight+'px'}catch(e){}}
-document.querySelectorAll('iframe').forEach(function(f){f.addEventListener('load',function(){fit(f);setTimeout(function(){fit(f)},600)})});
+var tabs=[].slice.call(document.querySelectorAll('.tab'));
+function show(day,focus){
+  tabs.forEach(function(t){
+    var on=t.getAttribute('aria-controls')==='day-'+day;
+    t.setAttribute('aria-selected',String(on));t.tabIndex=on?0:-1;
+    document.getElementById(t.getAttribute('aria-controls')).classList.toggle('off',!on);
+    if(on&&focus)t.focus();
+  });
+}
+tabs.forEach(function(t,i){
+  t.addEventListener('click',function(){show(t.id.slice(4))});
+  t.addEventListener('keydown',function(e){
+    var d=e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0;
+    if(d){e.preventDefault();show(tabs[(i+d+tabs.length)%tabs.length].id.slice(4),true)}
+  });
+});
+document.querySelectorAll('a.row[href^="#day-"]').forEach(function(a){
+  a.addEventListener('click',function(e){
+    e.preventDefault();show(a.getAttribute('href').slice(5));
+    document.querySelector('.tabs').scrollIntoView({behavior:'smooth',block:'start'});
+  });
+});
 document.querySelectorAll('.lesson').forEach(function(a){
   var f=a.querySelector('iframe');
   a.querySelectorAll('.pill').forEach(function(b){b.addEventListener('click',function(){
     a.querySelectorAll('.pill').forEach(function(x){x.setAttribute('aria-pressed',String(x===b))});
-    f.style.width=b.dataset.width;setTimeout(function(){fit(f)},250);
+    f.style.width=b.dataset.width;
   })});
 });
 </script>
