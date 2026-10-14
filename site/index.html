@@ -99,7 +99,7 @@
   <section id="how" class="wrap section stack" style="gap:56px">
     <div class="stack" style="gap:16px">
       <p class="eyebrow">How it works</p>
-      <h2 style="max-width:16ch">From the book you wrote to a course you sell.</h2>
+      <h2>From the book you wrote to a course you sell.</h2>
     </div>
     <ol class="steps">
       <li><span class="step-n">1</span><span class="step-t">Upload your PDF</span><span class="step-d">Drop in the ebook you already have. Dripbook reads its chapters and headings.</span></li>
@@ -122,6 +122,7 @@
           <button type="button" class="pill" data-value="29" aria-pressed="false">$29</button>
           <button type="button" class="pill" data-value="49" aria-pressed="true">$49</button>
           <button type="button" class="pill" data-value="79" aria-pressed="false">$79</button>
+          <button type="button" class="pill" data-value="99" aria-pressed="false">$99</button>
         </div>
       </div>
       <div class="group" role="group" aria-labelledby="readers-label">
@@ -131,6 +132,7 @@
           <button type="button" class="pill" data-value="100" aria-pressed="true">100</button>
           <button type="button" class="pill" data-value="250" aria-pressed="false">250</button>
           <button type="button" class="pill" data-value="500" aria-pressed="false">500</button>
+          <button type="button" class="pill" data-value="1000" aria-pressed="false">1,000</button>
         </div>
       </div>
       <div class="result" aria-live="polite">
@@ -197,7 +199,7 @@
     var net = Math.round(state.price * state.readers * (1 - SHARE / 100));
     document.getElementById('amount').textContent = '$' + net.toLocaleString('en-US');
     document.getElementById('detail').textContent =
-      'from ' + state.readers + ' readers at $' + state.price + ", after Dripbook's " + SHARE + '% share';
+      'from ' + state.readers.toLocaleString('en-US') + ' readers at $' + state.price + ", after Dripbook's " + SHARE + '% share';
   }
 
   document.querySelectorAll('.pills').forEach(function (group) {
