@@ -289,6 +289,12 @@ BOOK_CSS = (".book{display:flex;flex-wrap:wrap;gap:32px;align-items:center}"
 PRIVATE_FOOTER = '<footer><div class="wrap">Made with Dripbook. This page is private and not listed anywhere.</div></footer>'
 
 
+def copy_lesson_emails(src, out):
+    """The preview links each lesson to its own email file; publish those next to it."""
+    for f in sorted(src.glob("day-*.html")):
+        (out / f.name).write_text(f.read_text(encoding="utf-8").replace("{{UNSUBSCRIBE_URL}}", "#"), encoding="utf-8")
+
+
 def build_claude_code_preview():
     out = DEMO / "claude-code-preview"
     preview = (CC_SRC / "preview.html").read_text(encoding="utf-8")
@@ -312,6 +318,9 @@ def build_claude_code_preview():
     ])
     out.mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text(page, encoding="utf-8")
+    copy_lesson_emails(CC_SRC, out)
+    if (out / "day-03.html").exists():
+        (out / "day-03.html").write_text(fix_email(day3).replace("{{UNSUBSCRIBE_URL}}", "#"), encoding="utf-8")
     cover = pdfium.PdfDocument(str(CC_PDF))[0].render(scale=1).to_pil().convert("RGB")
     cover.thumbnail((320, 460))
     cover.save(out / "cover.jpg", quality=85, optimize=True)
@@ -332,6 +341,7 @@ def build_think_python_preview():
     ])
     out.mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text(page, encoding="utf-8")
+    copy_lesson_emails(TP_SRC, out)
     if (TP_SRC / "figures").is_dir():
         shutil.copytree(TP_SRC / "figures", out / "figures", dirs_exist_ok=True)
     return out
