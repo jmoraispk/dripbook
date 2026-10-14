@@ -22,6 +22,8 @@ Render the converter output first, then run this script:
 thinkpython2.pdf comes from https://greenteapress.com/thinkpython2/thinkpython2.pdf.
 """
 import html
+import json
+import re
 import shutil
 from pathlib import Path
 
@@ -40,16 +42,23 @@ TP_URL = "https://greenteapress.com/wp/think-python-2e/"
 TP_PRICE = 49
 # Shown next to the hero buy button. Only put a number here once real reader data backs it.
 TP_BADGE = "Everything unlocked"
-# Lessons per chapter: chapters 1 and 2 follow think-python.plan.json; the rest are
-# estimated from each chapter's word count at about 900 words (4 minutes) a lesson.
-TP_OUTLINE = [
-    ("The way of the program", 3), ("Variables, expressions and statements", 3), ("Functions", 4),
-    ("Case study: interface design", 3), ("Conditionals and recursion", 4), ("Fruitful functions", 4),
-    ("Iteration", 3), ("Strings", 3), ("Case study: word play", 3), ("Lists", 4), ("Dictionaries", 4),
-    ("Tuples", 3), ("Case study: data structure selection", 4), ("Files", 4), ("Classes and objects", 2),
-    ("Classes and functions", 2), ("Classes and methods", 3), ("Inheritance", 4), ("The Goodies", 3),
-    ("Appendix A: Debugging", 4), ("Appendix B: Analysis of algorithms", 4),
+# Words per chapter, counted from thinkpython2.pdf. Lessons per chapter follow from the
+# lesson length the reader picks, at about TP_WPM words a minute.
+TP_CHAPTERS = [
+    ("The way of the program", 2752), ("Variables, expressions and statements", 2295), ("Functions", 3611),
+    ("Case study: interface design", 3122), ("Conditionals and recursion", 3507), ("Fruitful functions", 3731),
+    ("Iteration", 2537), ("Strings", 2996), ("Case study: word play", 2266), ("Lists", 3868),
+    ("Dictionaries", 3811), ("Tuples", 3107), ("Case study: data structure selection", 3903), ("Files", 3208),
+    ("Classes and objects", 2149), ("Classes and functions", 1964), ("Classes and methods", 2995),
+    ("Inheritance", 3882), ("The Goodies", 2771), ("Appendix A: Debugging", 3372),
+    ("Appendix B: Analysis of algorithms", 3836),
 ]
+TP_WPM = 220
+TP_LENGTHS = [5, 10, 15]  # minutes; the first is the default
+
+
+def tp_counts(minutes):
+    return [max(1, round(words / (minutes * TP_WPM))) for _, words in TP_CHAPTERS]
 
 # The table on page 18 of the sample, word for word.
 HEAD = ["Dimension", "Claude Code", "GitHub Copilot", "Cursor"]
@@ -124,6 +133,13 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
 .cover-t{margin:0;font-family:var(--serif);font-size:44px;line-height:1.05}
 .cover-s{margin:10px 0 0;font-family:var(--serif);font-style:italic;font-size:19px;color:var(--band-muted)}
 .cover-a{margin:0;font-size:15px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--band-muted)}
+.length{display:flex;flex-direction:column;gap:10px}
+.length-t{font-size:16px;font-weight:700}
+.length-row{display:flex;flex-wrap:wrap;align-items:center;gap:12px 18px}
+.length-pills{display:flex;gap:8px}
+.length-pills .pill{min-width:0;min-height:48px;padding:0 18px}
+.length-r{font-size:16px;color:var(--muted)}
+.length-r strong{color:var(--ink);font-size:20px}
 .buy-top{display:flex;flex-direction:column;gap:12px}
 .buy-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
 .buy-top .btn{border:0;cursor:pointer;font:inherit;font-size:19px;font-weight:700}
@@ -166,22 +182,31 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
     <div class="hero-copy stack">
       <p class="eyebrow">A daily email course</p>
       <h1>Learn Python, one short lesson a day.</h1>
-      <p class="lede">Allen B. Downey's <em>Think Python</em>, in @TOTAL@ lessons of about four minutes each. One arrives every morning, and you can read ahead whenever you are hooked.</p>
+      <p class="lede">Allen B. Downey's <em>Think Python</em>, one lesson every morning, as short or as long as you like. Read ahead whenever you are hooked.</p>
+      <div class="length" role="group" aria-labelledby="length-label">
+        <span id="length-label" class="length-t">How long should each lesson be?</span>
+        <div class="length-row">
+          <div class="length-pills">@LENGTH_PILLS@</div>
+          <span class="length-r"><strong data-total>@TOTAL@</strong> lessons, one a day</span>
+        </div>
+      </div>
+      <form class="join" data-demo data-note="note-free">
+        <label for="email" class="sr" style="position:absolute;left:-10000px">Your email</label>
+        <input id="email" type="email" placeholder="Your email" autocomplete="email" required>
+        <input type="hidden" name="minutes" value="@MINUTES@">
+        <button type="submit" class="btn btn-ribbon" style="flex:0 0 auto">Start free</button>
+      </form>
+      <p class="small">The first 3 lessons are free.</p>
+      <p class="demo-note" id="note-free" role="status" aria-live="polite"></p>
+      <p class="or">or get everything now</p>
       <div class="buy-top">
         <div class="buy-row">
-          <button type="button" class="btn btn-ribbon btn-lg" data-demo data-note="note-buy-top">Get all @TOTAL@ lessons for $@PRICE@</button>
+          <button type="button" class="btn btn-lg" data-demo data-note="note-buy-top"><span>Get all <span data-total>@TOTAL@</span> lessons for $@PRICE@</span></button>
           <span class="badge">@BADGE@</span>
         </div>
         <p class="small">One payment. Every lesson unlocked from day one, read at your own pace.</p>
         <p class="demo-note" id="note-buy-top" role="status" aria-live="polite"></p>
       </div>
-      <p class="or">or try it first</p>
-      <form class="join" data-demo data-note="note-free">
-        <label for="email" class="sr" style="position:absolute;left:-10000px">Your email</label>
-        <input id="email" type="email" placeholder="Your email" autocomplete="email" required>
-        <button type="submit" class="btn" style="flex:0 0 auto">Start free</button>
-      </form>
-      <p class="demo-note" id="note-free" role="status" aria-live="polite"></p>
       <ul class="facts">
         <li>Pause any time</li>
         <li>Read ahead whenever you like</li>
@@ -215,11 +240,11 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
   <section id="outline" class="wrap section stack outline" style="gap:40px">
     <div class="stack" style="gap:16px">
       <p class="eyebrow">What you learn</p>
-      <h2>@TOTAL@ lessons, the whole book.</h2>
-      <p class="body">Chapter by chapter, in the author's order. Lesson counts after Chapter 2 are approximate.</p>
+      <h2><span data-total>@TOTAL@</span> lessons, the whole book.</h2>
+      <p class="body">Chapter by chapter, in the author's order, at <span data-minutes>@MINUTES@</span> minutes a lesson. Lesson counts are estimated from each chapter's length.</p>
     </div>
     <div class="inbox">
-      <div class="inbox-head"><span>@TOTAL@ lessons, one a day</span></div>
+      <div class="inbox-head"><span><span data-total>@TOTAL@</span> lessons, one a day</span><span>First 3 free</span></div>
 @OUTLINE@
     </div>
   </section>
@@ -229,11 +254,11 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
       <div class="stack" style="gap:20px">
         <p class="eyebrow" style="color:var(--band-muted)">The full course</p>
         <p class="price">$@PRICE@</p>
-        <p class="body">One payment for all @TOTAL@ lessons. Start with the three free ones if you want to try it first.</p>
+        <p class="body">One payment for all <span data-total>@TOTAL@</span> lessons. Start with the three free ones if you want to try it first.</p>
       </div>
       <div class="stack" style="gap:24px">
         <ul>
-          <li>A lesson every morning, about four minutes each</li>
+          <li>A lesson every morning, <span data-minutes>@MINUTES@</span> minutes each</li>
           <li>"Send the next one now" whenever you want more</li>
           <li>Pause for a busy week and pick up where you left off</li>
           <li>Every code example and exercise from the book</li>
@@ -263,6 +288,23 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
 </footer>
 
 <script>
+var CHAPTER_WORDS = @CHAPTER_WORDS@, WPM = @WPM@;
+function setLength(minutes) {
+  var day = 1, total = 0;
+  document.querySelectorAll('.outline [data-ch]').forEach(function (row) {
+    var n = Math.max(1, Math.round(CHAPTER_WORDS[+row.dataset.ch] / (minutes * WPM)));
+    row.querySelector('.day').textContent = n === 1 ? 'Day ' + day : 'Days ' + day + '\u2013' + (day + n - 1);
+    row.querySelector('[data-count]').textContent = n + (n === 1 ? ' lesson' : ' lessons');
+    day += n; total += n;
+  });
+  document.querySelectorAll('[data-total]').forEach(function (el) { el.textContent = total; });
+  document.querySelectorAll('[data-minutes]').forEach(function (el) { el.textContent = minutes; });
+  document.querySelectorAll('[data-min]').forEach(function (b) { b.setAttribute('aria-pressed', String(+b.dataset.min === minutes)); });
+  document.querySelector('input[name="minutes"]').value = minutes;
+}
+document.querySelectorAll('[data-min]').forEach(function (b) {
+  b.addEventListener('click', function () { setLength(+b.dataset.min); });
+});
 document.querySelectorAll('[data-demo]').forEach(function (el) {
   var note = document.getElementById(el.dataset.note);
   el.addEventListener(el.tagName === 'FORM' ? 'submit' : 'click', function (e) {
@@ -350,23 +392,28 @@ def build_think_python_preview():
 def build_think_python_sales():
     out = ROOT / "site/think-python"
     out.mkdir(parents=True, exist_ok=True)
-    total = sum(n for _, n in TP_OUTLINE)
+    minutes = TP_LENGTHS[0]
+    counts = tp_counts(minutes)
+    total = sum(counts)
     lesson1 = (TP_SRC / "day-01.html").read_text(encoding="utf-8").replace("{{UNSUBSCRIBE_URL}}", "#")
     # The rendered plan covers chapters 1 and 2; the sales page sells the whole book.
-    lesson1 = lesson1.replace("Lesson 1 of 6", f"Lesson 1 of {total}")
+    lesson1 = re.sub(r"Lesson 1 of \d+", "Lesson 1", lesson1)
     (out / "lesson-1.html").write_text(lesson1, encoding="utf-8")
     rows, day = [], 1
-    for i, (title, n) in enumerate(TP_OUTLINE):
+    for i, ((title, _), n) in enumerate(zip(TP_CHAPTERS, counts)):
         days = f"Day {day}" if n == 1 else f"Days {day}–{day + n - 1}"
         label = title if title.startswith("Appendix") else f"Chapter {i + 1}: {title}"
-        free = day == 1
         rows.append(
-            f'<div class="row{" row-locked" if not free else ""}"><span class="day">{days}</span>'
+            f'<div class="row{" row-locked" if i else ""}" data-ch="{i}"><span class="day">{days}</span>'
             f'<div class="row-text"><span class="subject">{html.escape(label)}</span>'
-            f'<span class="preview">{n} lessons{", the first 3 free" if free else ""}</span></div></div>')
+            f'<span class="preview" data-count>{n} lesson{"s" if n != 1 else ""}</span></div></div>')
         day += n
+    pills = "".join(f'<button type="button" class="pill" data-min="{m}" aria-pressed="{str(m == minutes).lower()}">'
+                    f"{m} min</button>" for m in TP_LENGTHS)
     page = (SALES_PAGE.replace("@TOTAL@", str(total)).replace("@PRICE@", str(TP_PRICE))
-            .replace("@OUTLINE@", "\n".join(rows)).replace("@BOOK_URL@", TP_URL).replace("@BADGE@", TP_BADGE))
+            .replace("@OUTLINE@", "\n".join(rows)).replace("@BOOK_URL@", TP_URL).replace("@BADGE@", TP_BADGE)
+            .replace("@LENGTH_PILLS@", pills).replace("@MINUTES@", str(minutes))
+            .replace("@CHAPTER_WORDS@", json.dumps([w for _, w in TP_CHAPTERS])).replace("@WPM@", str(TP_WPM)))
     (out / "index.html").write_text(page, encoding="utf-8")
     return out
 
