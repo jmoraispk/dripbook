@@ -37,13 +37,12 @@ Exclude:
 
 ## Where to look
 
-Start with these, roughly in order of expected yield:
+Search **Leanpub** (leanpub.com) only. Gumroad, Payhip, Lemon Squeezy, newsletters and X/LinkedIn were tried and dropped, because they yielded far fewer qualified creators for the effort.
 
-1. **Leanpub** (leanpub.com): browse the computer-programming categories and bestseller lists. Most books have free samples.
-2. **Gumroad**: Gumroad Discover and web searches like `site:gumroad.com rust ebook`, `site:gumroad.com "system design" pdf`.
-3. **Payhip and Lemon Squeezy**: web searches like `site:payhip.com python ebook` or `"lemonsqueezy.com" ebook golang`.
-4. **Newsletter writers who also sell an ebook**: search Substack and Beehiiv for engineering newsletters that link to a paid ebook.
-5. **X and LinkedIn**: developers promoting their own ebook. Use web search to find them; only use what's visible without logging in.
+- Browse the programming categories and their bestseller lists (all time and last week) at `leanpub.com/store/books/c/<category>`, e.g. `computer_programming`, `python`, `software_architecture`, `devops`, `javascript`.
+- Book pages show the reader count (when the author allows it), last update date, price range, free sample, table of contents and the author's other books. Author profiles at `leanpub.com/u/<username>` list their books and courses.
+- Leanpub courses live at `leanpub.com/c/<slug>` and aren't always listed on the author's profile, so look for one before setting `has_course` to no. Also check the author's own site and course platforms such as Udemy and Educative.
+- A creator may also sell elsewhere. That's fine, but `book_url` should be the Leanpub page.
 
 ## What to record
 

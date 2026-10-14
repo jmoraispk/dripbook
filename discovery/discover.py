@@ -5,14 +5,14 @@
 # ///
 """Customer discovery for Dripbook: find ebook creators worth pitching.
 
-Claude researches one source at a time (Leanpub, Gumroad, ...) with web search
+Claude researches Leanpub (the only source, per brief.md) with web search
 and web fetch, follows the rules in brief.md, and saves each qualified creator
 through a record_creator tool. State is saved after every step, so a run can be
 stopped with Ctrl-C and resumed. Everything is written to discovery/output/,
 which git ignores because it holds people's names and contact details.
 
-  uv run discovery/discover.py run                   # research until the goal is met or sources run out
-  uv run discovery/discover.py run --sources gumroad --target 20
+  uv run discovery/discover.py run                   # research until the goal is met or Leanpub runs dry
+  uv run discovery/discover.py run --sources leanpub --target 20
   uv run discovery/discover.py run --dry-run         # print the prompts without calling the API
   uv run discovery/discover.py export                # rewrite prospects.csv and summary.md from saved state
   uv run discovery/discover.py check-links           # confirm the URLs in prospects.csv still load
@@ -46,20 +46,12 @@ COLUMNS = [
 PLATFORMS = ["Leanpub", "Gumroad", "Payhip", "Lemon Squeezy", "own site", "other"]
 HAS_COURSE = ["yes", "no", "unclear"]
 
-# One research pass per source, in the brief's order of expected yield.
+# Research passes, one per source. The brief limits research to Leanpub, so there is one pass.
 SOURCES = {
-    "leanpub": "Leanpub (leanpub.com). Browse the computer-programming categories and bestseller lists. "
-               "Most books have a free sample, and book pages often show reader counts, update dates and "
-               "the author's other books.",
-    "gumroad": "Gumroad. Use Gumroad Discover and web searches like `site:gumroad.com rust ebook` or "
-               "`site:gumroad.com \"system design\" pdf`. Product pages often show ratings and sales counts.",
-    "payhip-lemonsqueezy": "Payhip and Lemon Squeezy. Use web searches like `site:payhip.com python ebook` "
-                           "or `\"lemonsqueezy.com\" ebook golang`.",
-    "newsletters": "Engineering newsletters on Substack and Beehiiv whose writers also sell a paid ebook. "
-                   "Find newsletters that link to their own ebook, then verify the book on its sales page.",
-    "social": "Developers promoting their own ebook on X and LinkedIn. Find them through web search only. "
-              "You cannot open x.com or linkedin.com pages, so verify each creator on their sales page or "
-              "personal site. A profile URL seen in search results is fine as a contact channel.",
+    "leanpub": "Leanpub (leanpub.com). Browse the programming categories and their bestseller lists at "
+               "leanpub.com/store/books/c/<category>. Most books have a free sample, and book pages often show "
+               "reader counts, update dates and the author's other books. Leanpub courses live at "
+               "leanpub.com/c/<slug> and aren't always listed on the author's profile.",
 }
 
 # Pages that need a login to read. Search results from them are fine; fetching them is not.
