@@ -1,0 +1,5 @@
+# Prospect research output: real people's names and contact details. Keep it out of git.
+discovery/output/
+
+__pycache__/
+.vercel/
