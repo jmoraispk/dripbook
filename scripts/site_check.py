@@ -7,8 +7,8 @@
 
 Settings are written in the pages as {{NAME}} and filled in place by `fill`:
   SITE_URL       public address of the site, no trailing slash (used for the share image)
-  CONTACT_EMAIL  where the Contact link, privacy page and form fallback point
-  FORM_ENDPOINT  form backend URL that receives sign-ups (e.g. a Formspree form)
+  CONTACT_EMAIL  where the Contact link and privacy page point
+  EXAMPLE_URL    the example course preview linked from the upload section
 """
 import argparse
 import re
@@ -17,7 +17,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 SITE = Path(__file__).resolve().parent.parent / "site"
-SETTINGS = ("SITE_URL", "CONTACT_EMAIL", "FORM_ENDPOINT")
+SETTINGS = ("SITE_URL", "CONTACT_EMAIL", "EXAMPLE_URL")
 TOKEN = re.compile(r"\{\{([A-Z_]+)\}\}")
 TEXT_SUFFIXES = {".html", ".css", ".txt", ".svg", ".js", ".json", ".xml"}
 

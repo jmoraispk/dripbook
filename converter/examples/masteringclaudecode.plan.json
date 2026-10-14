@@ -1,0 +1,75 @@
+{
+  "book": {
+    "title": "Claude Code: From Basics to Mastery",
+    "author": "Steve Publications"
+  },
+  "source": {
+    "file": "masteringclaudecode-sample.pdf",
+    "url": "https://leanpub.com/masteringclaudecode"
+  },
+  "planned_by": "hand",
+  "cta_note": "The rest of the course covers the anatomy of Claude Code, setup, prompt engineering, real-world workflows, testing, automation, multi-agent patterns, deployment and security.",
+  "lessons": [
+    {
+      "first_block": "p8.1",
+      "last_block": "p11.9",
+      "subject": "The engineer who no longer types",
+      "lead_in": "",
+      "teaser": "Who the book is for, how it is organized, and the thesis behind it."
+    },
+    {
+      "first_block": "p11.10",
+      "last_block": "p14.1",
+      "subject": "Who this book is for, and the thesis behind it",
+      "lead_in": "",
+      "teaser": "Chapter 1 begins: five years of AI coding tools, from autocomplete to agents."
+    },
+    {
+      "first_block": "p15.1",
+      "last_block": "p18.17",
+      "subject": "From autocomplete to agents",
+      "lead_in": "",
+      "teaser": "How the creator of Claude Code uses it, and what 400,000 sessions say about who does what."
+    },
+    {
+      "first_block": "p18.18",
+      "last_block": "p21.3",
+      "subject": "How the creator works, and who does what",
+      "lead_in": "",
+      "teaser": "The other agentic coding tools of 2026, and why adoption is accelerating now."
+    },
+    {
+      "first_block": "p21.4",
+      "last_block": "p23.4",
+      "subject": "The 2026 landscape, and why now",
+      "lead_in": "",
+      "teaser": "An honest look at what agentic tools still get wrong, starting with context and benchmarks."
+    },
+    {
+      "first_block": "p23.5",
+      "last_block": "p25.1",
+      "subject": "Trade-offs: context, benchmarks and the real world",
+      "lead_in": "",
+      "teaser": "Hallucination in multi-step chains, security risks, usage limits and lock-in."
+    },
+    {
+      "first_block": "p25.2",
+      "last_block": "p26.4",
+      "subject": "Hallucination, security, limits and lock-in",
+      "lead_in": "",
+      "teaser": ""
+    }
+  ],
+  "skipped": [
+    {
+      "first_block": "p1.1",
+      "last_block": "p7.4",
+      "reason": "Cover, copyright page and table of contents"
+    },
+    {
+      "first_block": "p27.1",
+      "last_block": "p68.2",
+      "reason": "Chapters 2 to 19 and references, which this sample only includes in condensed form"
+    }
+  ]
+}

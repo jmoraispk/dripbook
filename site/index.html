@@ -159,23 +159,18 @@
     <div class="cta">
       <div class="stack" style="gap:20px">
         <h2>Your book is already written. Send it.</h2>
-        <p class="body">We are setting up the first books by hand. Tell us where to find yours, and we will turn a sample chapter into a free preview of your first lessons. You see everything before anything goes live.</p>
+        <p class="body">Upload your PDF and we take it from there. Please read these three points first.</p>
       </div>
-      <form class="signup" id="signup">
-        <p class="signup-t">Send us your book</p>
-        <div class="field">
-          <label for="email">Your email</label>
-          <input id="email" name="email" type="email" autocomplete="email" required>
-        </div>
-        <div class="field">
-          <label for="book">Link to your PDF or sample chapter <span class="opt">(optional)</span></label>
-          <input id="book" name="book" type="text" inputmode="url" autocomplete="url" placeholder="leanpub.com/your-book">
-        </div>
-        <div class="hp" aria-hidden="true"><label for="company">Leave this empty</label><input id="company" name="_gotcha" type="text" tabindex="-1" autocomplete="off"></div>
-        <button type="submit" class="btn btn-ribbon btn-lg">Send my book</button>
-        <p class="form-status" id="form-status" role="status" aria-live="polite"></p>
-        <p class="form-note">We only use your email to talk to you about Dripbook. <a href="privacy.html">Privacy</a></p>
-      </form>
+      <div class="upload">
+        <p class="upload-t">Read this before uploading</p>
+        <ol class="notes">
+          <li><span><strong>We assemble every book by hand.</strong> A person turns your PDF into lessons, so your course is not ready the moment you upload.</span></li>
+          <li><span><strong>See what you will get.</strong> <a href="example/" target="_blank" rel="noopener">Preview an example course</a>, the page you would share with your readers.</span></li>
+          <li><span><strong>Leave your email with your PDF.</strong> The upload page asks for it. We will email you there when your sales page is ready.</span></li>
+        </ol>
+        <a class="btn btn-ribbon btn-lg" href="https://www.dropbox.com/request/dtds3axh71m4jur0v85d" target="_blank" rel="noopener">Upload PDF</a>
+        <p class="upload-note">Opens a Dropbox upload page in a new tab. We only use your email to talk to you about your book. <a href="privacy.html">Privacy</a></p>
+      </div>
     </div>
   </section>
 </main>
@@ -212,45 +207,6 @@
       state[key] = Number(btn.getAttribute('data-value'));
       render();
     });
-  });
-
-  // Sign-up form. FORM_ENDPOINT is any form backend that accepts a POST and
-  // answers JSON, e.g. https://formspree.io/f/abcdwxyz. Until it is set, the
-  // form falls back to opening an email to CONTACT_EMAIL.
-  var FORM_ENDPOINT = '{{FORM_ENDPOINT}}';
-  var CONTACT_EMAIL = '{{CONTACT_EMAIL}}';
-  function isSet(v) { return v.indexOf('{{') !== 0; }
-
-  var form = document.getElementById('signup');
-  var statusEl = document.getElementById('form-status');
-  var submit = form.querySelector('button[type="submit"]');
-
-  form.addEventListener('submit', function (e) {
-    e.preventDefault();
-    var data = new FormData(form);
-    if (isSet(FORM_ENDPOINT)) {
-      submit.disabled = true;
-      statusEl.textContent = 'Sending…';
-      fetch(FORM_ENDPOINT, { method: 'POST', body: data, headers: { Accept: 'application/json' } })
-        .then(function (res) {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          form.reset();
-          statusEl.textContent = 'Thanks. We will email you within two working days.';
-        })
-        .catch(function () {
-          statusEl.textContent = isSet(CONTACT_EMAIL)
-            ? 'That did not go through. Try again, or email ' + CONTACT_EMAIL + '.'
-            : 'That did not go through. Try again in a minute.';
-        })
-        .then(function () { submit.disabled = false; });
-    } else if (isSet(CONTACT_EMAIL)) {
-      var body = 'Email: ' + data.get('email') + '\nBook: ' + (data.get('book') || '');
-      window.location.href = 'mailto:' + CONTACT_EMAIL +
-        '?subject=' + encodeURIComponent('Dripbook preview') + '&body=' + encodeURIComponent(body);
-      statusEl.textContent = 'Your email app should open with this filled in. Press send and we will reply.';
-    } else {
-      statusEl.textContent = 'Sign-ups open soon.';
-    }
   });
 
   render();

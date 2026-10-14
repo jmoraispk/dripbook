@@ -24,17 +24,19 @@ Then open http://localhost:8000.
 The pages contain three settings written as `{{NAME}}`. Fill them in once:
 
 ```bash
-python3 scripts/site_check.py fill SITE_URL=https://your-domain.com CONTACT_EMAIL=you@your-domain.com FORM_ENDPOINT=https://formspree.io/f/yourid
+python3 scripts/site_check.py fill SITE_URL=https://your-domain.com CONTACT_EMAIL=you@your-domain.com EXAMPLE_URL=https://your-domain.com/example/
 ```
 
 - `SITE_URL` is the public address, used for the link preview image on social sites.
-- `CONTACT_EMAIL` is used by the Contact link, the privacy page and the form's fallback.
-- `FORM_ENDPOINT` receives preview requests from the sign-up form. Any backend that accepts a form POST and returns JSON works; [Formspree](https://formspree.io) has a free tier. Until it is set, the form opens the visitor's email app addressed to `CONTACT_EMAIL`.
+- `CONTACT_EMAIL` is used by the Contact link and the privacy page.
+- `EXAMPLE_URL` is the example course preview linked from the upload section, for example a `preview.html` made by the converter.
+
+Books are uploaded through a Dropbox file request, which also asks for the uploader's name and email. Its link is in the `#start` section of `site/index.html`.
 
 Also check:
 
 - The revenue share shown on the page (`SHARE = 10` in `site/index.html`).
-- The privacy page (`site/privacy.html`) matches the form provider you picked.
+- The privacy page (`site/privacy.html`) still matches how uploads are collected.
 
 Then run the check. It exits non-zero if a link is broken or a setting is still empty:
 

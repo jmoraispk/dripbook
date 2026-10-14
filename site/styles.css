@@ -131,19 +131,16 @@ details p{margin:12px 0 0;font-size:18px;line-height:1.6;color:var(--muted)}
 .cta > *{flex:1 1 380px;min-width:0}
 .cta h2{font-size:clamp(36px,4.6vw,60px);line-height:1.02;max-width:12ch}
 .cta .body{color:var(--band-muted)}
-.signup{border:2px dashed var(--ribbon);border-radius:20px;padding:40px 32px;display:flex;flex-direction:column;gap:20px}
-@media (max-width:600px){.cta{padding:36px 20px}.signup{padding:28px 20px}.signup .btn{align-self:stretch}}
-.signup-t{margin:0;font-size:22px;font-weight:700}
-.field{display:flex;flex-direction:column;gap:8px}
-.field label{font-size:16px;font-weight:600}
-.field .opt{font-weight:400;color:var(--band-muted)}
-.field input{min-height:52px;width:100%;border-radius:12px;border:1.5px solid var(--band-muted);background:var(--surface);color:var(--ink);font:inherit;font-size:17px;padding:12px 16px}
-.signup .btn{border:0;cursor:pointer;font:inherit;font-size:18px;font-weight:700;align-self:flex-start}
-.signup .btn[disabled]{opacity:.6;cursor:progress}
-.form-note{margin:0;font-size:15px;line-height:1.5;color:var(--band-muted)}
-.form-note a{color:var(--band-text)}
-.form-status{margin:0;font-size:16px;font-weight:600;color:var(--ribbon)}
-.hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
+.upload{border:2px dashed var(--ribbon);border-radius:20px;padding:40px 32px;display:flex;flex-direction:column;gap:24px}
+@media (max-width:600px){.cta{padding:36px 20px}.upload{padding:28px 20px}.upload .btn{align-self:stretch}}
+.upload-t{margin:0;font-size:15px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--ribbon)}
+.notes{margin:0;padding:0;list-style:none;counter-reset:note;display:flex;flex-direction:column;gap:18px}
+.notes li{counter-increment:note;display:grid;grid-template-columns:32px 1fr;gap:12px;font-size:18px;line-height:1.5;color:var(--band-muted)}
+.notes li::before{content:counter(note);width:32px;height:32px;border-radius:50%;background:var(--ribbon);color:var(--on-ribbon);font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center}
+.notes strong{color:var(--band-text)}
+.notes a,.upload-note a{color:var(--band-text);text-underline-offset:3px}
+.upload .btn{align-self:flex-start}
+.upload-note{margin:0;font-size:15px;line-height:1.5;color:var(--band-muted)}
 
 /* simple pages (privacy, 404) */
 .page{max-width:720px;padding-block:56px 112px;display:flex;flex-direction:column;gap:20px}
