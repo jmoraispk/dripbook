@@ -1,4 +1,6 @@
-# Prospect research output: real people's names and contact details. Keep it out of git.
+# Prospect research output: real people's names and contact details. Only the CSVs (prospects.csv and the
+# Leanpub book-slug lists) are force-added, on purpose, because the repo is private; anything else written
+# here (e.g. discover.py's state.json) stays untracked. Don't push this to a public repo.
 discovery/output/
 # Converted books and downloaded PDFs: other people's copyrighted text.
 converter/output/
