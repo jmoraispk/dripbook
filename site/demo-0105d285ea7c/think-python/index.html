@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Think Python, as a daily email course</title>
+<meta name="theme-color" content="#141B33">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<style>
+.cover{position:relative;width:min(300px,78vw);aspect-ratio:2/3;margin-inline:auto;background:var(--band);color:var(--band-text);border-radius:10px 16px 16px 10px;box-shadow:0 24px 48px rgba(20,27,51,.28);padding:36px 28px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
+.cover::before{content:"";position:absolute;inset:0 auto 0 0;width:12px;background:rgba(0,0,0,.25)}
+.cover .ribbon{right:28px;top:-6px;height:110px;width:26px}
+.cover-t{margin:0;font-family:var(--serif);font-size:44px;line-height:1.05}
+.cover-s{margin:10px 0 0;font-family:var(--serif);font-style:italic;font-size:19px;color:var(--band-muted)}
+.cover-a{margin:0;font-size:15px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--band-muted)}
+.join{display:flex;flex-wrap:wrap;gap:12px;max-width:34em}
+.join input{flex:1 1 240px;min-height:60px;border-radius:999px;border:1.5px solid var(--rule);background:var(--surface);color:var(--ink);font:inherit;font-size:18px;padding:0 24px}
+.join .btn{border:0;cursor:pointer;font:inherit;font-size:19px;font-weight:700}
+.demo-note{margin:0;font-size:16px;font-weight:600;color:var(--ink)}
+.facts{display:flex;flex-wrap:wrap;gap:12px 28px;margin:0;padding:0;list-style:none;font-size:16px;font-weight:600;color:var(--muted)}
+.facts li::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ribbon);margin-right:10px;vertical-align:middle}
+.lesson-frame{border:1.5px solid var(--rule);border-radius:20px;overflow:hidden;background:#F4F5F8;max-width:760px}
+.lesson-frame iframe{display:block;width:100%;height:760px;border:0}
+.outline{max-width:860px}
+.outline .row-locked .day{background:var(--ink);color:var(--paper)}
+.outline .row-locked{background:transparent}
+.outline .inbox-head+.row{background:var(--ribbon-soft)}
+.outline .inbox-head+.row .day{background:var(--ribbon);color:var(--on-ribbon)}
+.outline .day{min-width:92px;text-align:center}
+.buy .btn{border:0;cursor:pointer;font:inherit;font-size:19px;font-weight:700;align-self:flex-start}
+.buy .price{margin:0;font-size:clamp(56px,7vw,88px);font-weight:800;letter-spacing:-.03em;line-height:1}
+.buy ul{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:8px;font-size:18px;line-height:1.5;color:var(--band-muted)}
+.buy .demo-note{color:var(--ribbon)}
+</style>
+</head>
+<body>
+
+<header class="wrap nav">
+  <span class="brand">Think Python <span style="font-weight:500;color:var(--muted)">· email course</span></span>
+  <nav aria-label="Main">
+    <a href="#outline">What you learn</a>
+    <a href="#faq">Questions</a>
+    <a href="#buy" class="btn">Get the course</a>
+  </nav>
+</header>
+
+<main>
+  <section class="wrap hero split">
+    <div class="hero-copy stack">
+      <p class="eyebrow">A daily email course</p>
+      <h1>Learn Python, one short lesson a day.</h1>
+      <p class="lede">Allen B. Downey's <em>Think Python</em>, in 71 lessons of about four minutes each. One arrives every morning, and you can read ahead whenever you are hooked.</p>
+      <form class="join" data-demo>
+        <label for="email" class="sr" style="position:absolute;left:-10000px">Your email</label>
+        <input id="email" type="email" placeholder="you@example.com" autocomplete="email" required>
+        <button type="submit" class="btn btn-ribbon">Start free</button>
+      </form>
+      <p class="demo-note" role="status" aria-live="polite"></p>
+      <ul class="facts">
+        <li>First 3 lessons free</li>
+        <li>Then $49 for the rest</li>
+        <li>Pause any time</li>
+      </ul>
+    </div>
+    <div class="hero-visual" style="flex:1 1 360px">
+      <div class="cover" role="img" aria-label="Think Python by Allen B. Downey">
+        <div class="ribbon" aria-hidden="true"></div>
+        <div><p class="cover-t">Think Python</p><p class="cover-s">How to Think Like a Computer Scientist</p></div>
+        <p class="cover-a">Allen B. Downey</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="statement">
+    <div class="wrap section split">
+      <p class="big">No prior programming needed. Just your inbox and ten minutes with a Python prompt open.</p>
+      <p class="aside">Each lesson is a passage of the book itself, cut where a lesson should end. Type the examples as you go: by the end you write functions, work with lists and dictionaries, read files and build your own classes.</p>
+    </div>
+  </section>
+
+  <section class="wrap section stack" style="gap:40px">
+    <div class="stack" style="gap:16px">
+      <p class="eyebrow">Lesson 1, as it arrives</p>
+      <h2>See exactly what you get.</h2>
+    </div>
+    <div class="lesson-frame"><iframe src="lesson-1.html" title="Lesson 1 email" loading="lazy"></iframe></div>
+    <p class="small">Scroll inside the box to read the whole lesson.</p>
+  </section>
+
+  <section id="outline" class="wrap section stack outline" style="gap:40px">
+    <div class="stack" style="gap:16px">
+      <p class="eyebrow">What you learn</p>
+      <h2>71 lessons, the whole book.</h2>
+      <p class="body">Chapter by chapter, in the author's order. Lesson counts after Chapter 2 are approximate.</p>
+    </div>
+    <div class="inbox">
+      <div class="inbox-head"><span>71 lessons, one a day</span></div>
+<div class="row"><span class="day">Days 1–3</span><div class="row-text"><span class="subject">Chapter 1: The way of the program</span><span class="preview">3 lessons, the first 3 free</span></div></div>
+<div class="row row-locked"><span class="day">Days 4–6</span><div class="row-text"><span class="subject">Chapter 2: Variables, expressions and statements</span><span class="preview">3 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 7–10</span><div class="row-text"><span class="subject">Chapter 3: Functions</span><span class="preview">4 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 11–13</span><div class="row-text"><span class="subject">Chapter 4: Case study: interface design</span><span class="preview">3 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 14–17</span><div class="row-text"><span class="subject">Chapter 5: Conditionals and recursion</span><span class="preview">4 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 18–21</span><div class="row-text"><span class="subject">Chapter 6: Fruitful functions</span><span class="preview">4 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 22–24</span><div class="row-text"><span class="subject">Chapter 7: Iteration</span><span class="preview">3 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 25–27</span><div class="row-text"><span class="subject">Chapter 8: Strings</span><span class="preview">3 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 28–30</span><div class="row-text"><span class="subject">Chapter 9: Case study: word play</span><span class="preview">3 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 31–34</span><div class="row-text"><span class="subject">Chapter 10: Lists</span><span class="preview">4 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 35–38</span><div class="row-text"><span class="subject">Chapter 11: Dictionaries</span><span class="preview">4 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 39–41</span><div class="row-text"><span class="subject">Chapter 12: Tuples</span><span class="preview">3 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 42–45</span><div class="row-text"><span class="subject">Chapter 13: Case study: data structure selection</span><span class="preview">4 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 46–49</span><div class="row-text"><span class="subject">Chapter 14: Files</span><span class="preview">4 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 50–51</span><div class="row-text"><span class="subject">Chapter 15: Classes and objects</span><span class="preview">2 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 52–53</span><div class="row-text"><span class="subject">Chapter 16: Classes and functions</span><span class="preview">2 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 54–56</span><div class="row-text"><span class="subject">Chapter 17: Classes and methods</span><span class="preview">3 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 57–60</span><div class="row-text"><span class="subject">Chapter 18: Inheritance</span><span class="preview">4 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 61–63</span><div class="row-text"><span class="subject">Chapter 19: The Goodies</span><span class="preview">3 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 64–67</span><div class="row-text"><span class="subject">Appendix A: Debugging</span><span class="preview">4 lessons</span></div></div>
+<div class="row row-locked"><span class="day">Days 68–71</span><div class="row-text"><span class="subject">Appendix B: Analysis of algorithms</span><span class="preview">4 lessons</span></div></div>
+    </div>
+  </section>
+
+  <section id="buy" class="wrap" style="padding-bottom:112px">
+    <div class="cta buy">
+      <div class="stack" style="gap:20px">
+        <p class="eyebrow" style="color:var(--band-muted)">The full course</p>
+        <p class="price">$49</p>
+        <p class="body">One payment for all 71 lessons. Start with the three free ones if you want to try it first.</p>
+      </div>
+      <div class="stack" style="gap:24px">
+        <ul>
+          <li>A lesson every morning, about four minutes each</li>
+          <li>"Send the next one now" whenever you want more</li>
+          <li>Pause for a busy week and pick up where you left off</li>
+          <li>Every code example and exercise from the book</li>
+        </ul>
+        <button type="button" class="btn btn-ribbon btn-lg" data-demo>Buy the course for $49</button>
+        <p class="demo-note" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" class="wrap section stack faq" style="gap:32px;padding-top:0">
+    <h2>Questions</h2>
+    <div class="faq-list">
+      <details><summary>Do I need to know how to program?</summary><p>No. The book starts from what a program is and how to run one. You need a computer where you can install Python, or a browser to use Python online.</p></details>
+      <details><summary>What happens after the free lessons?</summary><p>The third lesson ends with a link to buy the rest. If you don't, the emails simply stop.</p></details>
+      <details><summary>Can I read faster than one a day?</summary><p>Yes. Every lesson has a "Send the next one now" button.</p></details>
+      <details><summary>Can I pause?</summary><p>Yes, from a link in any email. The course waits and picks up exactly where you left off.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>Based on <a href="https://greenteapress.com/wp/think-python-2e/">Think Python, 2nd edition</a> by Allen B. Downey, <a href="https://creativecommons.org/licenses/by-nc/3.0/">CC BY-NC 3.0</a>.</span>
+    <span>Demo page made with Dripbook. Nothing here is for sale.</span>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('[data-demo]').forEach(function (el) {
+  var note = el.parentElement.querySelector('.demo-note') || el.closest('.stack').querySelector('.demo-note');
+  el.addEventListener(el.tagName === 'FORM' ? 'submit' : 'click', function (e) {
+    e.preventDefault();
+    note.textContent = 'This is a demo page, so sign-up and checkout are not live.';
+  });
+});
+</script>
+</body>
+</html>
