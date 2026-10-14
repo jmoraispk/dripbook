@@ -1,0 +1,45 @@
+{
+  "book": {"title": "Think Python", "author": "Allen B. Downey"},
+  "source": {"file": "thinkpython2.pdf", "url": "https://greenteapress.com/thinkpython2/thinkpython2.pdf", "pages": [23, 38]},
+  "planned_by": "hand",
+  "cta_note": "The rest of the course covers functions, conditionals and recursion, iteration, strings, lists, dictionaries, files and classes.",
+  "lessons": [
+    {
+      "first_block": "p23.1", "last_block": "p24.13",
+      "subject": "The way of the program",
+      "lead_in": "Day one: what every program is made of, and how to start the Python interpreter.",
+      "teaser": "Your first program, Python's arithmetic operators, and why the language is so strict."
+    },
+    {
+      "first_block": "p25.1", "last_block": "p28.1",
+      "subject": "Hello, World! Values, types and formal languages",
+      "lead_in": "Keep an interpreter open for this one: the examples are short and meant to be typed.",
+      "teaser": "Why programming errors are called bugs, the words to know from Chapter 1, and exercises to try."
+    },
+    {
+      "first_block": "p28.2", "last_block": "p30.6",
+      "subject": "Debugging, plus the Chapter 1 glossary and exercises",
+      "lead_in": "",
+      "teaser": "Chapter 2 starts with variables, assignment statements and how Python evaluates expressions."
+    },
+    {
+      "first_block": "p31.1", "last_block": "p33.15",
+      "subject": "Variables, expressions and script mode",
+      "lead_in": "",
+      "teaser": "The order of operations, two operators that work on strings, and comments worth writing."
+    },
+    {
+      "first_block": "p33.16", "last_block": "p35.11",
+      "subject": "Order of operations, string operations and comments",
+      "lead_in": "",
+      "teaser": "Syntax, runtime and semantic errors, then the Chapter 2 glossary and exercises."
+    },
+    {
+      "first_block": "p35.12", "last_block": "p37.8",
+      "subject": "Three kinds of errors",
+      "lead_in": "",
+      "teaser": ""
+    }
+  ],
+  "skipped": []
+}

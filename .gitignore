@@ -1,5 +1,7 @@
 # Prospect research output: real people's names and contact details. Keep it out of git.
 discovery/output/
+# Converted books and downloaded PDFs: other people's copyrighted text.
+converter/output/
 
 __pycache__/
 .vercel/

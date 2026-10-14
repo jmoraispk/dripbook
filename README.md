@@ -7,6 +7,7 @@ Turn your ebook into a paid email course.
 | `scripts/site_check.py` | Pre-launch check for `site/`: broken links and unfilled settings. |
 | `vercel.json` | Hosting config: serves `site/` on Vercel. |
 | `discovery/` | Customer discovery: finds ebook creators to pitch. Not part of the website. |
+| `converter/` | Turns an ebook PDF or its free sample into email lessons, for private previews. |
 
 ## Website
 
@@ -78,3 +79,30 @@ python3 -m unittest discover -s discovery                  # offline tests
 ```
 
 A full run makes a few hundred web searches and fetches on Claude Opus 5.5. A rough estimate, not yet measured, is tens of dollars. Try one source first with `--sources leanpub --target 10`; the script prints token and search counts at the end, so you can see the quality and cost before running everything.
+
+## Converter
+
+`converter/convert.py` turns a non-fiction ebook PDF, or just its free sample, into a Dripbook course and renders a preview to send privately to the author. Lessons are excerpts of the book, never rewrites: Claude only decides where each lesson starts and ends and writes the subject line, an optional one-line lead-in and a one-line "Tomorrow:" teaser. The script copies the lesson text from the PDF itself and checks that the lessons cover the book in order, so nothing is invented or silently dropped. Code blocks, lists and headings keep their exact text and indentation. Figures can't be carried over yet; each one is replaced by a note pointing to its page and listed in the report.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+uv run converter/convert.py sample.pdf                     # plan with Claude, then render
+uv run converter/convert.py https://example.com/book.pdf --pages 23-38   # a URL, and only some pages
+```
+
+Results go to `converter/output/<book-slug>/`, which git ignores:
+
+- `lessons.json`: the whole plan, with every lesson's text, read time and pages, plus figures that weren't carried over, skipped pages and warnings
+- `day-01.html`, `day-01.txt`, ...: the free lessons (`--free`, default 3) as email-ready HTML and plain text. The last free one ends with the "continue the course" button (`--price`, `--cta-url`). `{{CHECKOUT_URL}}` and `{{UNSUBSCRIBE_URL}}` are placeholders for whatever sends the emails.
+- `preview.html`: the lesson sequence and the free emails in one page, in the landing page's style
+
+To render without the API, pass a plan. `lessons.json` from an earlier run works, so you can edit subjects or move split points and render again. `converter/examples/think-python.plan.json` is a hand-made plan for chapters 1 and 2 of [Think Python](https://greenteapress.com/thinkpython2/thinkpython2.pdf) (CC BY-NC):
+
+```bash
+uv run converter/convert.py converter/output/thinkpython2.pdf --pages 23-38 --plan converter/examples/think-python.plan.json
+uv run converter/convert.py book.pdf --blocks              # list the numbered blocks a plan refers to
+uv run converter/convert.py book.pdf --dry-run             # show the prompts without calling the API
+python3 -m unittest discover -s converter                  # offline tests
+```
+
+Long books are planned one chapter-sized part at a time (`--chunk-words`, default 12,000), so a whole book costs about one pass over its text in input tokens. Not measured yet: try a sample first. Known limits: scanned PDFs (no OCR), two-column layouts, and math formulas, which come out as plain text.
