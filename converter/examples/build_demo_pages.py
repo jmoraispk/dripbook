@@ -38,6 +38,8 @@ CC_URL = "https://leanpub.com/masteringclaudecode"
 TP_SRC = OUTPUT / "think-python"
 TP_URL = "https://greenteapress.com/wp/think-python-2e/"
 TP_PRICE = 49
+# Shown next to the hero buy button. Only put a number here once real reader data backs it.
+TP_BADGE = "Everything unlocked"
 # Lessons per chapter: chapters 1 and 2 follow think-python.plan.json; the rest are
 # estimated from each chapter's word count at about 900 words (4 minutes) a lesson.
 TP_OUTLINE = [
@@ -122,6 +124,12 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
 .cover-t{margin:0;font-family:var(--serif);font-size:44px;line-height:1.05}
 .cover-s{margin:10px 0 0;font-family:var(--serif);font-style:italic;font-size:19px;color:var(--band-muted)}
 .cover-a{margin:0;font-size:15px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--band-muted)}
+.buy-top{display:flex;flex-direction:column;gap:12px}
+.buy-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
+.buy-top .btn{border:0;cursor:pointer;font:inherit;font-size:19px;font-weight:700}
+.badge{font-family:var(--sans);display:inline-flex;align-items:center;padding:8px 14px;border-radius:999px;background:var(--ribbon-soft);border:1.5px solid var(--ribbon);font-size:14px;font-weight:800;color:var(--ink)}
+.or{display:flex;align-items:center;gap:14px;max-width:34em;margin:0;font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.or::before,.or::after{content:"";flex:1;height:1.5px;background:var(--line)}
 .join{display:flex;flex-wrap:wrap;gap:12px;max-width:34em}
 .join input{flex:1 1 240px;min-height:60px;border-radius:999px;border:1.5px solid var(--rule);background:var(--surface);color:var(--ink);font:inherit;font-size:18px;padding:0 24px}
 .join .btn{border:0;cursor:pointer;font:inherit;font-size:19px;font-weight:700}
@@ -159,16 +167,24 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
       <p class="eyebrow">A daily email course</p>
       <h1>Learn Python, one short lesson a day.</h1>
       <p class="lede">Allen B. Downey's <em>Think Python</em>, in @TOTAL@ lessons of about four minutes each. One arrives every morning, and you can read ahead whenever you are hooked.</p>
-      <form class="join" data-demo>
+      <div class="buy-top">
+        <div class="buy-row">
+          <button type="button" class="btn btn-ribbon btn-lg" data-demo data-note="note-buy-top">Get all @TOTAL@ lessons for $@PRICE@</button>
+          <span class="badge">@BADGE@</span>
+        </div>
+        <p class="small">One payment. Every lesson unlocked from day one, read at your own pace.</p>
+        <p class="demo-note" id="note-buy-top" role="status" aria-live="polite"></p>
+      </div>
+      <p class="or">or try it first</p>
+      <form class="join" data-demo data-note="note-free">
         <label for="email" class="sr" style="position:absolute;left:-10000px">Your email</label>
         <input id="email" type="email" placeholder="you@example.com" autocomplete="email" required>
-        <button type="submit" class="btn btn-ribbon">Start free</button>
+        <button type="submit" class="btn">Start 3 free lessons</button>
       </form>
-      <p class="demo-note" role="status" aria-live="polite"></p>
+      <p class="demo-note" id="note-free" role="status" aria-live="polite"></p>
       <ul class="facts">
-        <li>First 3 lessons free</li>
-        <li>Then $@PRICE@ for the rest</li>
         <li>Pause any time</li>
+        <li>Read ahead whenever you like</li>
       </ul>
     </div>
     <div class="hero-visual" style="flex:1 1 360px">
@@ -222,8 +238,8 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
           <li>Pause for a busy week and pick up where you left off</li>
           <li>Every code example and exercise from the book</li>
         </ul>
-        <button type="button" class="btn btn-ribbon btn-lg" data-demo>Buy the course for $@PRICE@</button>
-        <p class="demo-note" role="status" aria-live="polite"></p>
+        <button type="button" class="btn btn-ribbon btn-lg" data-demo data-note="note-buy">Buy the course for $@PRICE@</button>
+        <p class="demo-note" id="note-buy" role="status" aria-live="polite"></p>
       </div>
     </div>
   </section>
@@ -248,7 +264,7 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
 
 <script>
 document.querySelectorAll('[data-demo]').forEach(function (el) {
-  var note = el.parentElement.querySelector('.demo-note') || el.closest('.stack').querySelector('.demo-note');
+  var note = document.getElementById(el.dataset.note);
   el.addEventListener(el.tagName === 'FORM' ? 'submit' : 'click', function (e) {
     e.preventDefault();
     note.textContent = 'This is a demo page, so sign-up and checkout are not live.';
@@ -340,7 +356,7 @@ def build_think_python_sales():
             f'<span class="preview">{n} lessons{", the first 3 free" if free else ""}</span></div></div>')
         day += n
     page = (SALES_PAGE.replace("@TOTAL@", str(total)).replace("@PRICE@", str(TP_PRICE))
-            .replace("@OUTLINE@", "\n".join(rows)).replace("@BOOK_URL@", TP_URL))
+            .replace("@OUTLINE@", "\n".join(rows)).replace("@BOOK_URL@", TP_URL).replace("@BADGE@", TP_BADGE))
     (out / "index.html").write_text(page, encoding="utf-8")
     return out
 
