@@ -58,6 +58,7 @@ LIGATURES = str.maketrans({"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", 
                            "­": "", " ": " "})
 BULLET = re.compile(r"^([•●▪■◦‣∙·○◆➢➤✓✔]|[-–—*](?=\s)|\d{1,2}[.)](?=\s)|[a-z][.)](?=\s)|\([a-z0-9]{1,3}\)(?=\s))\s*")
 NUMBERED_HEADING = re.compile(r"^(\d+(\.\d+)*|[A-Z](\.\d+)+)\.?\s+\S")
+FIGURE_CAPTION = re.compile(r"^(Figure|Fig\.|Diagram|Illustration|Image)\s+[A-Z]?\d+([.\-]\d+)*\s*[:.]\s")
 CAPTION = re.compile(r"^(Figure|Fig\.|Table|Listing|Diagram|Exhibit|Illustration|Image)\s+[\dA-Z]+([.\-]\d+)*\s*[:.]?", re.I)
 PAGE_NUMBER = re.compile(r"^\s*([0-9]{1,4}|[ivxlcdm]{1,7})\b|\b([0-9]{1,4}|[ivxlcdm]{1,7})\s*$", re.I)
 TERMINAL = re.compile(r"[.!?:;)\]\"”’]$")
@@ -171,17 +172,17 @@ def add_text(runs, text, style):
 
 
 def figure_regions(page):
-    """Boxes on the page made of drawings or images, merged when they touch."""
+    """Boxes on the page made of drawings or images, merged when they touch. parts are the pieces' boxes."""
     w, h = page["width"], page["height"]
     items = []
     for x0, top, x1, bottom, kind in page["graphics"]:
         gw, gh = x1 - x0, bottom - top
         if (gh < 2.5 and gw > 0.25 * w) or (gw > 0.9 * w and gh > 0.9 * h) or (gw < 0.5 and gh < 0.5):
             continue  # rules under headers and above footnotes, page backgrounds, specks
-        items.append([x0, top, x1, bottom, kind == "curve", False])
+        items.append([x0, top, x1, bottom, kind == "curve", False, [(x0, top, x1, bottom)]])
     for x0, top, x1, bottom in page["images"]:
         if x1 - x0 >= 16 and bottom - top >= 16:
-            items.append([x0, top, x1, bottom, False, True])
+            items.append([x0, top, x1, bottom, False, True, [(x0, top, x1, bottom)]])
     merged = True
     while merged:
         merged, out = False, []
@@ -189,13 +190,13 @@ def figure_regions(page):
             for m in out:
                 if it[0] <= m[2] + 8 and m[0] <= it[2] + 8 and it[1] <= m[3] + 8 and m[1] <= it[3] + 8:
                     m[:4] = [min(m[0], it[0]), min(m[1], it[1]), max(m[2], it[2]), max(m[3], it[3])]
-                    m[4], m[5] = m[4] or it[4], m[5] or it[5]
+                    m[4], m[5], m[6] = m[4] or it[4], m[5] or it[5], m[6] + it[6]
                     merged = True
                     break
             else:
                 out.append(list(it))
         items = out
-    return [{"box": tuple(round(v, 1) for v in m[:4]), "curves": m[4], "image": m[5]} for m in items]
+    return [{"box": tuple(round(v, 1) for v in m[:4]), "curves": m[4], "image": m[5], "parts": m[6]} for m in items]
 
 
 def inside(c, box, pad=2.0):
@@ -218,18 +219,30 @@ def page_layout(page):
         box = region["box"]
         if not region["image"] and ((box[2] - box[0]) < 40 or (box[3] - box[1]) < 25):
             continue
+        if not (region["image"] or region["curves"] or len(region["parts"]) >= 3):
+            continue  # a frame or a shaded background
         within = [c for c in chars if inside(c, box)]
-        if not (region["image"] or region["curves"]) or looks_like_text_box(lines_from_chars(within)):
-            continue  # a box drawn around text: keep the text
+        interior = [g for g in region["parts"] if g[0] > box[0] + 3 and g[1] > box[1] + 3
+                    and g[2] < box[2] - 3 and g[3] < box[3] - 3]
+        if not region["image"] and not interior and looks_like_text_box(lines_from_chars(within)):
+            continue  # a box drawn around text, like a code listing or a callout: keep the text
         if not region["image"]:
             # labels of a drawing often sit beside or just outside its boxes: take the whole band
-            box = (0, box[1] - 4, page["width"], box[3] + 4)
+            box = (0, box[1] - 9, page["width"], box[3] + 9)
             beside = lines_from_chars([c for c in chars if inside(c, box, pad=0)])
             if looks_like_text_box(beside) and len(beside) > 3:
                 box = region["box"]  # ordinary text runs beside it; only take what is inside
-        chars = [c for c in chars if not inside(c, box, pad=0 if box[0] == 0 else 2)]
+        pad = 0 if box[0] == 0 else 2
+        taken = [c for c in chars if inside(c, box, pad)]
+        chars = [c for c in chars if not inside(c, box, pad)]
+        crop = list(region["box"])
+        for c in taken:   # the image must include the labels taken out of the text
+            crop = [min(crop[0], c[1]), min(crop[1], c[3]), max(crop[2], c[2]), max(crop[3], c[4] + 0.25 * c[5])]
+        crop = (max(0.0, crop[0] - 4), max(0.0, crop[1] - 4),
+                min(page["width"], crop[2] + 4), min(page["height"], crop[3] + 4))
         figures.append({"top": box[1], "bottom": box[3], "kind": "image" if region["image"] else "drawing",
-                        "caption": ""})
+                        "caption": "", "box": [round(v, 1) for v in crop]})
+    figures = merge_side_by_side(figures)
     lines = lines_from_chars(chars)
     for f in figures:  # a caption sits just below or just above its figure
         near = [l for l in lines if CAPTION.match(l["text"]) and
@@ -243,6 +256,24 @@ def page_layout(page):
             f["caption"] = " ".join(l["text"].strip() for l in caption)
             lines = [l for l in lines if all(l is not c for c in caption)]
     return lines, figures
+
+
+def merge_side_by_side(figures):
+    """One figure made of pieces in a row (sub-figures, a diagram in parts) becomes one figure."""
+    out = []
+    for f in sorted(figures, key=lambda f: f["box"][0]):
+        for g in out:
+            overlap = min(f["bottom"], g["bottom"]) - max(f["top"], g["top"])
+            if overlap > 0.5 * min(f["bottom"] - f["top"], g["bottom"] - g["top"]):
+                g["box"] = [min(g["box"][0], f["box"][0]), min(g["box"][1], f["box"][1]),
+                            max(g["box"][2], f["box"][2]), max(g["box"][3], f["box"][3])]
+                g["top"], g["bottom"] = min(g["top"], f["top"]), max(g["bottom"], f["bottom"])
+                if f["kind"] == "image":
+                    g["kind"] = "image"
+                break
+        else:
+            out.append(dict(f))
+    return sorted(out, key=lambda f: f["top"])
 
 
 def remove_furniture(pages):
@@ -357,7 +388,8 @@ def build_blocks(pages):
         prev = None
         for _, kind, item in sorted(events, key=lambda e: (e[0], e[1])):
             if kind == 0:
-                blocks.append({"type": "figure", "page": page["number"], "kind": item["kind"], "caption": item["caption"]})
+                blocks.append({"type": "figure", "page": page["number"], "kind": item["kind"], "caption": item["caption"],
+                               "box": item["box"]})
                 continue
             line = dict(item, rel=item["x0"] - left, long=item["x1"] >= right - 0.15 * (right - left),
                         full=item["x1"] >= right - 0.5 * body)
@@ -556,7 +588,7 @@ def finish_blocks(blocks):
         b["id"] = f"p{b['page']}.{counts[b['page']]}"
         for k in [k for k in b if k.startswith("_")]:
             del b[k]
-    order = ["id", "type", "page", "level", "marker", "kind", "quote", "text", "caption", "runs"]
+    order = ["id", "type", "page", "level", "marker", "kind", "quote", "text", "caption", "box", "runs"]
     return [{k: b[k] for k in order if k in b} for b in out]
 
 
@@ -586,6 +618,10 @@ def parse(raw):
         warnings.append(f"{unmapped} characters couldn't be decoded from the PDF's fonts and show as (cid:N).")
     if not blocks:
         warnings.append("No text found. The PDF may be scanned images; this tool doesn't do OCR.")
+    for b in blocks:
+        if b["type"] == "paragraph" and FIGURE_CAPTION.match(b["text"]) and block_words(b) <= 30:
+            warnings.append(f"Page {b['page']}: {b['text'][:60]!r} looks like a figure caption, but no figure "
+                            "was found next to it. Check that page.")
     numbers = [p["number"] for p in raw["pages"]]
     return {"title": raw["title"], "author": raw["author"], "page_count": raw["page_count"],
             "pages": [min(numbers), max(numbers)] if numbers else [], "blocks": blocks, "warnings": warnings}
@@ -730,7 +766,7 @@ def build_course(raw, doc, settings):
     if errors:
         return None, errors
     index = {b["id"]: i for i, b in enumerate(blocks)}
-    lessons, warnings, missing = [], [], []
+    lessons, warnings = [], []
     for day, item in enumerate(sorted(raw["lessons"], key=lambda l: index[l["first_block"]]), 1):
         content = blocks[index[item["first_block"]]: index[item["last_block"]] + 1]
         words = sum(block_words(b) for b in content)
@@ -746,9 +782,6 @@ def build_course(raw, doc, settings):
             "blocks": content,
         }
         warnings += lesson_warnings(lesson, blocks, index)
-        for b in content:
-            if b["type"] == "figure":
-                missing.append({"day": day, "block": b["id"], "page": b["page"], "caption": b["caption"]})
         lessons.append(lesson)
     skipped = []
     for item in sorted(raw.get("skipped") or [], key=lambda s: index[s["first_block"]]):
@@ -771,16 +804,63 @@ def build_course(raw, doc, settings):
         "book": {"title": title, "author": author, "slug": slugify(title)},
         "source": settings["source"],
         "planned_by": raw.get("planned_by") or "hand",
-        "settings": {k: settings[k] for k in ("free_lessons", "price", "cta_url")},
+        "settings": {"free_lessons": settings["free_lessons"], "price": settings["price"],
+                     "cta_url": settings["cta_url"], "image_base_url": settings.get("image_base_url", "")},
         "cta_note": " ".join(str(raw.get("cta_note") or "").split()),
         "summary": {"lessons": len(lessons), "words": sum(l["words"] for l in lessons),
                     "skipped_words": sum(s["words"] for s in skipped)},
-        "figures_not_carried_over": missing,
+        "figures": [],
+        "figures_not_carried_over": [],
         "skipped": skipped,
         "warnings": doc["warnings"] + warnings,
         "lessons": lessons,
     }
     return course, []
+
+
+def render_figures(course, pdf_path, out_dir, resolution=200, crop_image=None):
+    """Save every figure in the course as a PNG cropped from the PDF, in out_dir/figures/.
+
+    Drawings are rendered from the PDF's vectors at `resolution` DPI, so they stay sharp
+    on high-density screens. Each figure block gets an "image" entry with the file name
+    and its display size in CSS pixels; figures that fail are listed with the reason.
+    crop_image(page_number, box) returns a PIL image; tests pass a fake one.
+    """
+    figures = [(l, b) for l in course["lessons"] for b in l["blocks"] if b["type"] == "figure"]
+    folder = out_dir / "figures"
+    if folder.exists():
+        for old in folder.glob("*.png"):
+            old.unlink()
+    if not figures:
+        return
+    folder.mkdir(parents=True, exist_ok=True)
+    pdf = None
+    if crop_image is None:
+        import pdfplumber
+        pdf = pdfplumber.open(pdf_path)
+
+        def crop_image(number, box):
+            page = pdf.pages[number - 1]
+            box = (max(0, box[0]), max(0, box[1]), min(float(page.width), box[2]), min(float(page.height), box[3]))
+            return page.crop(box).to_image(resolution=resolution).original
+    try:
+        for lesson, b in figures:
+            entry = {"day": lesson["day"], "block": b["id"], "page": b["page"], "caption": b["caption"]}
+            try:
+                if not b.get("box"):
+                    raise ValueError("the PDF reading didn't record where this figure is")
+                image = crop_image(b["page"], b["box"])
+                name = f"{b['id'].replace('.', '-')}.png"
+                image.save(folder / name, optimize=True)
+                width = round(min((b["box"][2] - b["box"][0]) * 96 / 72, 528))
+                b["image"] = {"file": f"figures/{name}", "width": width,
+                              "height": round(width * image.height / image.width)}
+                course["figures"].append(dict(entry, file=b["image"]["file"]))
+            except Exception as e:  # one bad figure shouldn't stop the others
+                course["figures_not_carried_over"].append(dict(entry, reason=str(e) or type(e).__name__))
+    finally:
+        if pdf is not None:
+            pdf.close()
 
 
 def slugify(text):
@@ -982,7 +1062,11 @@ def runs_html(block):
     return "".join(out)
 
 
-def block_html(block, lists):
+def image_src(file, base):
+    return f"{base.rstrip('/')}/{file}" if base else file
+
+
+def block_html(block, lists, image_base=""):
     """One block as email HTML. lists collects consecutive list items so they render as one table."""
     t = block["type"]
     para = f"margin:0 0 18px;font-family:{SERIF};font-size:19px;line-height:1.6;color:{C['ink']}"
@@ -1009,6 +1093,19 @@ def block_html(block, lists):
                 f'<pre class="dm-ink" style="margin:0;font-family:{MONO_STACK};font-size:14px;line-height:1.5;'
                 f'color:{C["ink"]};white-space:pre;word-wrap:normal;word-break:normal;tab-size:4">'
                 f'{esc(block["text"])}</pre></div></td></tr></table>')
+    if t == "figure" and block.get("image"):
+        img = block["image"]
+        alt = block["caption"] or f"Figure from page {block['page']} of the book"
+        caption = (f'<tr><td class="dm-muted" style="padding:8px 4px 0;font-family:{SANS};font-size:14px;'
+                   f'line-height:1.45;color:{C["muted"]};text-align:center">{esc(block["caption"])}</td></tr>'
+                   if block["caption"] else "")
+        # A white panel keeps diagrams drawn for paper readable in dark mode.
+        return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+                f'style="margin:4px 0 22px"><tr><td align="center" bgcolor="#FFFFFF" style="background:#FFFFFF;'
+                f'border:1px solid {C["line"]};border-radius:10px;padding:12px">'
+                f'<img src="{esc(image_src(img["file"], image_base))}" width="{img["width"]}" alt="{esc(alt)}" '
+                f'style="display:block;width:100%;max-width:{img["width"]}px;height:auto;border:0;margin:0 auto;'
+                f'font-family:{SANS};font-size:14px;color:{C["muted"]}"></td></tr>{caption}</table>')
     if t == "figure":
         caption = esc(block["caption"]) if block["caption"] else "A figure"
         return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
@@ -1034,13 +1131,13 @@ def list_html(items):
             f'style="margin:0 0 12px">{"".join(rows)}</table>')
 
 
-def body_html(blocks):
+def body_html(blocks, image_base=""):
     out, lists = [], []
     for b in blocks:
         if b["type"] != "list_item" and lists:
             out.append(list_html(lists))
             lists = []
-        out.append(block_html(b, lists))
+        out.append(block_html(b, lists, image_base))
     if lists:
         out.append(list_html(lists))
     return "\n".join(x for x in out if x)
@@ -1129,7 +1226,7 @@ Day {lesson["day"]} &middot; {esc(book["title"])}</td></tr>
 <tr><td class="dm-card dm-pad" style="background:{C["surface"]};border:1.5px solid {C["rule"]};border-radius:20px;padding:36px 36px 32px">
 <h1 class="dm-ink dm-title" style="margin:0 0 20px;font-family:{SANS};font-size:30px;line-height:1.15;font-weight:800;letter-spacing:-0.02em;color:{C["ink"]}">{esc(lesson["subject"])}</h1>
 {lead}
-{body_html(lesson["blocks"])}
+{body_html(lesson["blocks"], settings.get("image_base_url", ""))}
 {teaser}
 {cta}
 </td></tr>
@@ -1163,6 +1260,11 @@ def email_text(lesson, course):
             items = []
         if b["type"] == "code":
             parts.append("\n".join("    " + line if line else "" for line in b["text"].split("\n")))
+        elif b["type"] == "figure" and b.get("image"):
+            src = image_src(b["image"]["file"], settings.get("image_base_url", ""))
+            label = b["caption"] or f"Figure from page {b['page']} of the book"
+            parts.append(f"[{label} {src}]" if src.startswith("http") else
+                         f"[{label} The image is in the HTML version of this email.]")
         elif b["type"] == "figure":
             parts.append(f"[Figure not shown. {b['caption'] or 'A figure'} It is on page {b['page']} of the book.]")
         else:
@@ -1274,6 +1376,10 @@ def preview_html(course, emails):
     notes = [f"<p>Every lesson is an excerpt of {esc(book['title'])}, copied from the PDF without edits. "
              f"The only added words are each email's subject line, the short italic intro, the "
              f"&ldquo;Tomorrow&rdquo; line and the invitation at the end of Day {free}.</p>"]
+    if course["figures"]:
+        n = len(course["figures"])
+        notes.append(f"<p>{n} figure{'s are' if n > 1 else ' is'} cropped from the PDF as an image, "
+                     "with the caption from the book underneath.</p>")
     missing = course["figures_not_carried_over"]
     if missing:
         items = "".join(f"<li>Day {f['day']}: {esc(f['caption'] or 'a figure without a caption')} (page {f['page']})</li>"
@@ -1410,6 +1516,9 @@ def main(argv=None):
     parser.add_argument("--author", help="author name, if the PDF doesn't say")
     parser.add_argument("--price", type=int, default=49, help="course price in USD for the call to action (default: 49)")
     parser.add_argument("--cta-url", default="{{CHECKOUT_URL}}", help="link for the call to action")
+    parser.add_argument("--image-base-url", default="",
+                        help="public URL the figures/ folder will be uploaded to, e.g. a Vercel Blob prefix "
+                             "(default: relative links, which work for local previews)")
     parser.add_argument("--model", default="claude-opus-5-5", choices=MODELS)
     parser.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
     parser.add_argument("--chunk-words", type=int, default=12000, help="words per planning request (default: 12000)")
@@ -1459,7 +1568,7 @@ def main(argv=None):
             return 0
 
     settings = {"free_lessons": min(args.free, len(raw.get("lessons") or [])) or args.free, "price": args.price,
-                "cta_url": args.cta_url, "title": args.title, "author": args.author,
+                "cta_url": args.cta_url, "image_base_url": args.image_base_url, "title": args.title, "author": args.author,
                 "fallback_title": pdf.stem, "source": source}
     course, errors = build_course(raw, doc, settings)
     if errors:
@@ -1474,6 +1583,7 @@ def main(argv=None):
         return 1
 
     out_dir = Path(args.out) if args.out else DEFAULT_OUT / course["book"]["slug"]
+    render_figures(course, pdf, out_dir)
     write_outputs(course, out_dir)
     s = course["summary"]
     print(f"\n{course['book']['title']}: {s['lessons']} lessons, {s['words']:,} words "
@@ -1481,8 +1591,11 @@ def main(argv=None):
     for l in course["lessons"]:
         mark = "free" if l["free"] else "    "
         print(f"  Day {l['day']:>2} {mark} {l['minutes']:>4.1f} min  {l['subject']}")
+    if course["figures"]:
+        print(f"  {len(course['figures'])} figures saved as images in figures/")
     for f in course["figures_not_carried_over"]:
-        print(f"  figure not carried over: Day {f['day']}, page {f['page']}: {f['caption'] or '(no caption)'}")
+        print(f"  figure not carried over: Day {f['day']}, page {f['page']}: {f['caption'] or '(no caption)'} "
+              f"({f['reason']})")
     for w in course["warnings"]:
         print(f"  warning: {w}")
     print(f"\nWrote {out_dir}/: lessons.json, preview.html and {course['settings']['free_lessons']} emails "

@@ -202,6 +202,40 @@ class FigureTests(unittest.TestCase):
         code = [b for b in doc["blocks"] if b["type"] == "code"]
         self.assertEqual(code[0]["text"], "x = 1\ny = 2\nprint(x + y)")
 
+    def test_line_drawing_is_a_figure(self):
+        lines = [(100 + i * 10, 200, 110 + i * 10, 260, "line") for i in range(20)]
+        p = page(5, *para(["Text."], 100), chars("Figure 1.2: Lines.", 150, 280), graphics=lines)
+        doc = convert.parse({"title": "", "author": "", "page_count": 9, "pages": [p]})
+        self.assertEqual(doc["blocks"][-1]["type"], "figure")
+        self.assertEqual(doc["blocks"][-1]["caption"], "Figure 1.2: Lines.")
+
+    def test_diagram_with_aligned_labels_is_a_figure(self):
+        # a stack diagram: frames in a column with labels that line up, and arrows inside
+        frames = [(150, 200 + i * 30, 300, 226 + i * 30, "rect") for i in range(3)]
+        arrows = [(180, 208 + i * 30, 200, 212 + i * 30, "curve") for i in range(3)]
+        labels = [chars(f"n {i}", 160, 214 + i * 30) for i in range(3)]
+        title = chars("list", 150, 196, size=9)
+        p = page(5, *para(["Text."], 100), *labels, title, graphics=frames + arrows)
+        doc = convert.parse({"title": "", "author": "", "page_count": 9, "pages": [p]})
+        fig = doc["blocks"][-1]
+        self.assertEqual(fig["type"], "figure")
+        self.assertFalse(any(b.get("text", "").startswith(("n ", "list")) for b in doc["blocks"]))
+        self.assertLessEqual(fig["box"][1], 196 - 0.8 * 9, "the label above the frames is inside the crop")
+
+    def test_pieces_side_by_side_are_one_figure(self):
+        shapes = [(100, 200, 160, 260, "curve"), (220, 205, 280, 255, "curve"), (340, 200, 400, 262, "curve")]
+        p = page(5, *para(["Text."], 100), graphics=shapes)
+        doc = convert.parse({"title": "", "author": "", "page_count": 9, "pages": [p]})
+        figs = [b for b in doc["blocks"] if b["type"] == "figure"]
+        self.assertEqual(len(figs), 1)
+        self.assertEqual(figs[0]["box"], [96.0, 196.0, 404.0, 266.0])
+
+    def test_caption_without_figure_is_flagged(self):
+        p = page(5, *para(["Figure 4.1: Turtle flowers."], 100), *para(["Figure 4.1 shows flowers."], 130))
+        doc = convert.parse({"title": "", "author": "", "page_count": 9, "pages": [p]})
+        self.assertEqual(len(doc["warnings"]), 1)
+        self.assertIn("Turtle flowers", doc["warnings"][0])
+
     def test_image_is_reported(self):
         p = page(5, *para(["Text."], 100), images=[(100, 200, 400, 400)])
         doc = convert.parse({"title": "", "author": "", "page_count": 9, "pages": [p]})
@@ -315,7 +349,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(one["minutes"], round(932 / convert.WORDS_PER_MINUTE, 1))
         self.assertTrue(one["free"])
         self.assertFalse(two["free"])
-        self.assertEqual(course["figures_not_carried_over"], [{"day": 2, "block": "p8.1", "page": 8, "caption": "Figure 1"}])
+        self.assertEqual([b["id"] for b in two["blocks"] if b["type"] == "figure"], ["p8.1"])
         self.assertEqual(course["skipped"][0]["reason"], "title page")
         self.assertEqual(course["book"], {"title": "A Book", "author": "Ann Author", "slug": "a-book"})
 
@@ -464,6 +498,8 @@ class RenderTests(unittest.TestCase):
         self.assertIn("[Figure not shown. Figure 1.1: Boxes. It is on page 2 of the book.]", text)
 
     def test_preview_page(self):
+        with tempfile.TemporaryDirectory() as tmp:  # a figure that can't be cropped is listed on the page
+            convert.render_figures(self.course, "b.pdf", Path(tmp), crop_image=mock.Mock(side_effect=OSError("bad")))
         email = convert.email_html(self.course["lessons"][0], self.course)
         page = convert.preview_html(self.course, {1: email})
         self.assertEqual(page.count("<iframe"), 1)
@@ -471,6 +507,61 @@ class RenderTests(unittest.TestCase):
         self.assertIn("Second", page)
         self.assertIn("Figure 1.1: Boxes. (page 2)", page)
         self.assertIn("--ribbon:#F4B425", page)
+
+
+class FakeImage:
+    width, height = 600, 150
+
+    def __init__(self):
+        self.saved = []
+
+    def save(self, path, **kw):
+        Path(path).write_bytes(b"png")
+        self.saved.append(path)
+
+
+class FigureRenderTests(unittest.TestCase):
+    def course(self, base=""):
+        blocks = [
+            {"id": "p1.1", "type": "paragraph", "page": 1, "text": "See the figure."},
+            {"id": "p1.2", "type": "figure", "page": 1, "kind": "drawing", "caption": "Figure 1.1: Boxes & arrows.",
+             "box": [100.0, 200.0, 400.0, 275.0]},
+            {"id": "p2.1", "type": "figure", "page": 2, "kind": "image", "caption": "", "box": None},
+        ]
+        doc = {"title": "", "author": "", "blocks": blocks, "warnings": []}
+        plan = {"lessons": [{"first_block": "p1.1", "last_block": "p2.1", "subject": "S", "lead_in": "", "teaser": ""}]}
+        settings = {"free_lessons": 1, "price": 49, "cta_url": "#", "image_base_url": base, "title": "B", "author": "",
+                    "fallback_title": "b", "source": {}}
+        course, errors = convert.build_course(plan, doc, settings)
+        self.assertEqual(errors, [])
+        return course
+
+    def test_figures_saved_and_shown(self):
+        course = self.course()
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            convert.render_figures(course, "book.pdf", Path(tmp),
+                                   crop_image=lambda n, box: calls.append((n, box)) or FakeImage())
+            self.assertTrue((Path(tmp) / "figures" / "p1-2.png").exists())
+        self.assertEqual(calls, [(1, [100.0, 200.0, 400.0, 275.0])])
+        fig = course["lessons"][0]["blocks"][1]
+        self.assertEqual(fig["image"], {"file": "figures/p1-2.png", "width": 400, "height": 100})
+        self.assertEqual(course["figures"][0]["file"], "figures/p1-2.png")
+        self.assertEqual(len(course["figures_not_carried_over"]), 1)
+        html = convert.email_html(course["lessons"][0], course)
+        self.assertIn('<img src="figures/p1-2.png" width="400" alt="Figure 1.1: Boxes &amp; arrows."', html)
+        self.assertIn("Figure not shown.", html)  # the one without a position
+        text = convert.email_text(course["lessons"][0], course)
+        self.assertIn("[Figure 1.1: Boxes & arrows. The image is in the HTML version of this email.]", text)
+
+    def test_public_image_urls(self):
+        course = self.course(base="https://blob.example.com/think-python/")
+        with tempfile.TemporaryDirectory() as tmp:
+            convert.render_figures(course, "book.pdf", Path(tmp), crop_image=lambda n, box: FakeImage())
+        html = convert.email_html(course["lessons"][0], course)
+        self.assertIn('src="https://blob.example.com/think-python/figures/p1-2.png"', html)
+        text = convert.email_text(course["lessons"][0], course)
+        self.assertIn("[Figure 1.1: Boxes & arrows. https://blob.example.com/think-python/figures/p1-2.png]", text)
 
 
 class MainTests(unittest.TestCase):
@@ -540,6 +631,12 @@ class ThinkPythonTests(unittest.TestCase):
         self.assertEqual(convert.plan_errors(plan, doc["blocks"]), [])
         code = {b["id"]: b["text"] for b in doc["blocks"] if b["type"] == "code"}
         self.assertIn("False      class      finally    is         return", "\n".join(code.values()))
+
+    def test_every_captioned_figure_is_found(self):
+        doc = convert.extract(THINK_PYTHON)
+        captions = [b["caption"] for b in doc["blocks"] if b["type"] == "figure" and b["caption"]]
+        self.assertEqual(len(captions), 26)
+        self.assertFalse([w for w in doc["warnings"] if "caption" in w])
 
 
 if __name__ == "__main__":

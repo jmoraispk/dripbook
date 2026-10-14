@@ -53,7 +53,7 @@ Netlify and Cloudflare Pages work the same way: no build command, publish direct
 
 ## Customer discovery
 
-`discovery/discover.py` builds a list of self-published programming ebook creators to pitch, following the rules in `discovery/brief.md`. Claude searches each source in turn (Leanpub, Gumroad, Payhip and Lemon Squeezy, newsletters, X and LinkedIn), checks each creator against the brief on public pages, and saves the ones that qualify. It never contacts anyone.
+`discovery/discover.py` builds a list of self-published programming ebook creators to pitch, following the rules in `discovery/brief.md`. Claude searches Leanpub (the only source the brief allows), checks each creator against the brief on public pages, and saves the ones that qualify. It never contacts anyone.
 
 It needs [uv](https://docs.astral.sh/uv/) and an Anthropic API key:
 
@@ -82,7 +82,7 @@ A full run makes a few hundred web searches and fetches on Claude Opus 5.5. A ro
 
 ## Converter
 
-`converter/convert.py` turns a non-fiction ebook PDF, or just its free sample, into a Dripbook course and renders a preview to send privately to the author. Lessons are excerpts of the book, never rewrites: Claude only decides where each lesson starts and ends and writes the subject line, an optional one-line lead-in and a one-line "Tomorrow:" teaser. The script copies the lesson text from the PDF itself and checks that the lessons cover the book in order, so nothing is invented or silently dropped. Code blocks, lists and headings keep their exact text and indentation. Figures can't be carried over yet; each one is replaced by a note pointing to its page and listed in the report.
+`converter/convert.py` turns a non-fiction ebook PDF, or just its free sample, into a Dripbook course and renders a preview to send privately to the author. Lessons are excerpts of the book, never rewrites: Claude only decides where each lesson starts and ends and writes the subject line, an optional one-line lead-in and a one-line "Tomorrow:" teaser. The script copies the lesson text from the PDF itself and checks that the lessons cover the book in order, so nothing is invented or silently dropped. Code blocks, lists and headings keep their exact text and indentation. Figures (diagrams drawn in the PDF and embedded images) are cropped out as sharp PNGs with the book's caption underneath. Any caption that has no figure found next to it is reported, so missed figures don't go unnoticed.
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -95,6 +95,7 @@ Results go to `converter/output/<book-slug>/`, which git ignores:
 - `lessons.json`: the whole plan, with every lesson's text, read time and pages, plus figures that weren't carried over, skipped pages and warnings
 - `day-01.html`, `day-01.txt`, ...: the free lessons (`--free`, default 3) as email-ready HTML and plain text. The last free one ends with the "continue the course" button (`--price`, `--cta-url`). `{{CHECKOUT_URL}}` and `{{UNSUBSCRIBE_URL}}` are placeholders for whatever sends the emails.
 - `preview.html`: the lesson sequence and the free emails in one page, in the landing page's style
+- `figures/`: one PNG per figure. Emails link to them as `figures/…` by default, which works for local previews. For sending, upload the folder (to Vercel Blob, per `docs/email-delivery.md`) and render with `--image-base-url https://…/<book-slug>/` so the links are public.
 
 To render without the API, pass a plan. `lessons.json` from an earlier run works, so you can edit subjects or move split points and render again. `converter/examples/think-python.plan.json` is a hand-made plan for chapters 1 and 2 of [Think Python](https://greenteapress.com/thinkpython2/thinkpython2.pdf) (CC BY-NC):
 
