@@ -3,15 +3,13 @@
 # requires-python = ">=3.10"
 # dependencies = ["pypdfium2>=4", "pillow>=10"]
 # ///
-"""Build the hidden demo pages under site/demo-0105d285ea7c/.
+"""Build the demo pages. All are noindex and nothing on the public site links to them.
 
-The folder name is unguessable, every page is noindex, and nothing on the public
-site links to it, so the pages can be shared by link without being public.
-
-  site/demo-0105d285ea7c/                         index of the demo pages
-  site/demo-0105d285ea7c/claude-code-preview/     example course from a Leanpub sample
-  site/demo-0105d285ea7c/think-python-preview/    example course from Think Python, chapters 1-2
-  site/demo-0105d285ea7c/think-python/            a reader-facing sales page for Think Python
+  site/think-python/                              Think Python course sales page, for readers
+  site/think-python-preview/                      Think Python course preview, for the author
+  site/demo-0105d285ea7c/                         index of all demo pages (unguessable folder)
+  site/demo-0105d285ea7c/claude-code-preview/     example course from a Leanpub sample; kept in
+                                                  the hidden folder until the author agrees
 
 Render the converter output first, then run this script:
 
@@ -306,7 +304,7 @@ def build_claude_code_preview():
 
 
 def build_think_python_preview():
-    out = DEMO / "think-python-preview"
+    out = ROOT / "site/think-python-preview"
     page = apply((TP_SRC / "preview.html").read_text(encoding="utf-8"), [
         ('<span class="tag">Private preview</span>', '<span class="tag">Example course</span>'),
         ('<span class="eyebrow">Email course preview</span>', '<span class="eyebrow">Example Dripbook course</span>'),
@@ -324,7 +322,7 @@ def build_think_python_preview():
 
 
 def build_think_python_sales():
-    out = DEMO / "think-python"
+    out = ROOT / "site/think-python"
     out.mkdir(parents=True, exist_ok=True)
     total = sum(n for _, n in TP_OUTLINE)
     lesson1 = (TP_SRC / "day-01.html").read_text(encoding="utf-8").replace("{{UNSUBSCRIBE_URL}}", "#")
@@ -348,7 +346,8 @@ def build_think_python_sales():
 
 
 def build_index(pages):
-    links = "\n".join(f'<li><a href="{p.name}/">{html.escape(title)}</a></li>' for p, title in pages)
+    links = "\n".join(f'<li><a href="/{p.relative_to(ROOT / "site").as_posix()}/">{html.escape(title)}</a></li>'
+                      for p, title in pages)
     (DEMO / "index.html").write_text(INDEX_PAGE.replace("@LINKS@", links), encoding="utf-8")
 
 
