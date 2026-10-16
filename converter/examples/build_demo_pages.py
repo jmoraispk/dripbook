@@ -54,11 +54,21 @@ TP_CHAPTERS = [
     ("Appendix B: Analysis of algorithms", 3836),
 ]
 TP_WPM = 220
-TP_LENGTHS = [5, 10, 15]  # minutes; the first is the default
+TP_MINUTES = (5, 20, 5)  # slider minimum, maximum and starting value, in minutes
 
 
-def tp_counts(minutes):
-    return [max(1, round(words / (minutes * TP_WPM))) for _, words in TP_CHAPTERS]
+def tp_days(minutes):
+    """Total lessons and each chapter's (first, last) day. Lessons may cross chapter breaks."""
+    words = [w for _, w in TP_CHAPTERS]
+    total = max(1, round(sum(words) / (minutes * TP_WPM)))
+    per = sum(words) / total
+    days, start = [], 0
+    for w in words:
+        first = int(start // per) + 1
+        last = max(first, min(total, -int(-(start + w) // per)))
+        days.append((first, last))
+        start += w
+    return total, days
 
 # The table on page 18 of the sample, word for word.
 HEAD = ["Dimension", "Claude Code", "GitHub Copilot", "Cursor"]
@@ -136,9 +146,8 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
 .length{display:flex;flex-direction:column;gap:10px}
 .length-t{font-size:16px;font-weight:700}
 .length-row{display:flex;flex-wrap:wrap;align-items:center;gap:12px 18px}
-.length-pills{display:flex;gap:8px}
-.length-pills .pill{min-width:0;min-height:48px;padding:0 18px}
-.length-r{font-size:16px;color:var(--muted)}
+.length-row input{flex:1 1 220px;max-width:340px;height:36px;margin:0;accent-color:var(--ribbon);cursor:pointer}
+.length-r{min-width:10.5em;font-size:17px;color:var(--muted)}
 .length-r strong{color:var(--ink);font-size:20px}
 .buy-top{display:flex;flex-direction:column;gap:12px}
 .buy-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
@@ -183,11 +192,11 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
       <p class="eyebrow">A daily email course</p>
       <h1>Learn Python, one short lesson a day.</h1>
       <p class="lede">Allen B. Downey's <em>Think Python</em>, one lesson every morning, as short or as long as you like. Read ahead whenever you are hooked.</p>
-      <div class="length" role="group" aria-labelledby="length-label">
-        <span id="length-label" class="length-t">How long should each lesson be?</span>
+      <div class="length">
+        <label for="length" class="length-t">How long should each lesson be?</label>
         <div class="length-row">
-          <div class="length-pills">@LENGTH_PILLS@</div>
-          <span class="length-r"><strong data-total>@TOTAL@</strong> lessons, one a day</span>
+          <input type="range" id="length" min="@MIN@" max="@MAX@" step="1" value="@MINUTES@" aria-valuetext="@MINUTES@ minutes">
+          <span class="length-r"><strong><span data-minutes>@MINUTES@</span> min</strong> &middot; <span data-total>@TOTAL@</span> lessons</span>
         </div>
       </div>
       <form class="join" data-demo data-note="note-free">
@@ -241,7 +250,7 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
     <div class="stack" style="gap:16px">
       <p class="eyebrow">What you learn</p>
       <h2><span data-total>@TOTAL@</span> lessons, the whole book.</h2>
-      <p class="body">Chapter by chapter, in the author's order, at <span data-minutes>@MINUTES@</span> minutes a lesson. Lesson counts are estimated from each chapter's length.</p>
+      <p class="body">Chapter by chapter, in the author's order, at <span data-minutes>@MINUTES@</span> minutes a lesson. Days are estimated from each chapter's length; a lesson can run across a chapter break.</p>
     </div>
     <div class="inbox">
       <div class="inbox-head"><span><span data-total>@TOTAL@</span> lessons, one a day</span><span>First 3 free</span></div>
@@ -290,21 +299,21 @@ SALES_PAGE = PAGE_HEAD.replace("@TITLE@", "Think Python, as a daily email course
 <script>
 var CHAPTER_WORDS = @CHAPTER_WORDS@, WPM = @WPM@;
 function setLength(minutes) {
-  var day = 1, total = 0;
+  var all = CHAPTER_WORDS.reduce(function (a, b) { return a + b; }, 0);
+  var total = Math.max(1, Math.round(all / (minutes * WPM))), per = all / total, start = 0;
   document.querySelectorAll('.outline [data-ch]').forEach(function (row) {
-    var n = Math.max(1, Math.round(CHAPTER_WORDS[+row.dataset.ch] / (minutes * WPM)));
-    row.querySelector('.day').textContent = n === 1 ? 'Day ' + day : 'Days ' + day + '\u2013' + (day + n - 1);
-    row.querySelector('[data-count]').textContent = n + (n === 1 ? ' lesson' : ' lessons');
-    day += n; total += n;
+    var w = CHAPTER_WORDS[+row.dataset.ch];
+    var first = Math.floor(start / per) + 1, last = Math.max(first, Math.min(total, Math.ceil((start + w) / per)));
+    row.querySelector('.day').textContent = first === last ? 'Day ' + first : 'Days ' + first + '\u2013' + last;
+    start += w;
   });
   document.querySelectorAll('[data-total]').forEach(function (el) { el.textContent = total; });
   document.querySelectorAll('[data-minutes]').forEach(function (el) { el.textContent = minutes; });
-  document.querySelectorAll('[data-min]').forEach(function (b) { b.setAttribute('aria-pressed', String(+b.dataset.min === minutes)); });
+  slider.setAttribute('aria-valuetext', minutes + ' minutes');
   document.querySelector('input[name="minutes"]').value = minutes;
 }
-document.querySelectorAll('[data-min]').forEach(function (b) {
-  b.addEventListener('click', function () { setLength(+b.dataset.min); });
-});
+var slider = document.getElementById('length');
+slider.addEventListener('input', function () { setLength(+slider.value); });
 document.querySelectorAll('[data-demo]').forEach(function (el) {
   var note = document.getElementById(el.dataset.note);
   el.addEventListener(el.tagName === 'FORM' ? 'submit' : 'click', function (e) {
@@ -392,27 +401,23 @@ def build_think_python_preview():
 def build_think_python_sales():
     out = ROOT / "site/think-python"
     out.mkdir(parents=True, exist_ok=True)
-    minutes = TP_LENGTHS[0]
-    counts = tp_counts(minutes)
-    total = sum(counts)
+    low, high, minutes = TP_MINUTES
+    total, days_by_chapter = tp_days(minutes)
     lesson1 = (TP_SRC / "day-01.html").read_text(encoding="utf-8").replace("{{UNSUBSCRIBE_URL}}", "#")
     # The rendered plan covers chapters 1 and 2; the sales page sells the whole book.
     lesson1 = re.sub(r"Lesson 1 of \d+", "Lesson 1", lesson1)
     (out / "lesson-1.html").write_text(lesson1, encoding="utf-8")
-    rows, day = [], 1
-    for i, ((title, _), n) in enumerate(zip(TP_CHAPTERS, counts)):
-        days = f"Day {day}" if n == 1 else f"Days {day}–{day + n - 1}"
+    rows = []
+    for i, ((title, words), (first, last)) in enumerate(zip(TP_CHAPTERS, days_by_chapter)):
+        days = f"Day {first}" if first == last else f"Days {first}–{last}"
         label = title if title.startswith("Appendix") else f"Chapter {i + 1}: {title}"
         rows.append(
             f'<div class="row{" row-locked" if i else ""}" data-ch="{i}"><span class="day">{days}</span>'
             f'<div class="row-text"><span class="subject">{html.escape(label)}</span>'
-            f'<span class="preview" data-count>{n} lesson{"s" if n != 1 else ""}</span></div></div>')
-        day += n
-    pills = "".join(f'<button type="button" class="pill" data-min="{m}" aria-pressed="{str(m == minutes).lower()}">'
-                    f"{m} min</button>" for m in TP_LENGTHS)
+            f'<span class="preview">About {round(words / TP_WPM)} minutes of reading</span></div></div>')
     page = (SALES_PAGE.replace("@TOTAL@", str(total)).replace("@PRICE@", str(TP_PRICE))
             .replace("@OUTLINE@", "\n".join(rows)).replace("@BOOK_URL@", TP_URL).replace("@BADGE@", TP_BADGE)
-            .replace("@LENGTH_PILLS@", pills).replace("@MINUTES@", str(minutes))
+            .replace("@MIN@", str(low)).replace("@MAX@", str(high)).replace("@MINUTES@", str(minutes))
             .replace("@CHAPTER_WORDS@", json.dumps([w for _, w in TP_CHAPTERS])).replace("@WPM@", str(TP_WPM)))
     (out / "index.html").write_text(page, encoding="utf-8")
     return out

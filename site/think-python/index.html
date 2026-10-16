@@ -21,9 +21,8 @@
 .length{display:flex;flex-direction:column;gap:10px}
 .length-t{font-size:16px;font-weight:700}
 .length-row{display:flex;flex-wrap:wrap;align-items:center;gap:12px 18px}
-.length-pills{display:flex;gap:8px}
-.length-pills .pill{min-width:0;min-height:48px;padding:0 18px}
-.length-r{font-size:16px;color:var(--muted)}
+.length-row input{flex:1 1 220px;max-width:340px;height:36px;margin:0;accent-color:var(--ribbon);cursor:pointer}
+.length-r{min-width:10.5em;font-size:17px;color:var(--muted)}
 .length-r strong{color:var(--ink);font-size:20px}
 .buy-top{display:flex;flex-direction:column;gap:12px}
 .buy-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
@@ -68,11 +67,11 @@
       <p class="eyebrow">A daily email course</p>
       <h1>Learn Python, one short lesson a day.</h1>
       <p class="lede">Allen B. Downey's <em>Think Python</em>, one lesson every morning, as short or as long as you like. Read ahead whenever you are hooked.</p>
-      <div class="length" role="group" aria-labelledby="length-label">
-        <span id="length-label" class="length-t">How long should each lesson be?</span>
+      <div class="length">
+        <label for="length" class="length-t">How long should each lesson be?</label>
         <div class="length-row">
-          <div class="length-pills"><button type="button" class="pill" data-min="5" aria-pressed="true">5 min</button><button type="button" class="pill" data-min="10" aria-pressed="false">10 min</button><button type="button" class="pill" data-min="15" aria-pressed="false">15 min</button></div>
-          <span class="length-r"><strong data-total>61</strong> lessons, one a day</span>
+          <input type="range" id="length" min="5" max="20" step="1" value="5" aria-valuetext="5 minutes">
+          <span class="length-r"><strong><span data-minutes>5</span> min</strong> &middot; <span data-total>60</span> lessons</span>
         </div>
       </div>
       <form class="join" data-demo data-note="note-free">
@@ -86,7 +85,7 @@
       <p class="or">or get everything now</p>
       <div class="buy-top">
         <div class="buy-row">
-          <button type="button" class="btn btn-lg" data-demo data-note="note-buy-top"><span>Get all <span data-total>61</span> lessons for $49</span></button>
+          <button type="button" class="btn btn-lg" data-demo data-note="note-buy-top"><span>Get all <span data-total>60</span> lessons for $49</span></button>
           <span class="badge">Everything unlocked</span>
         </div>
         <p class="small">One payment. Every lesson unlocked from day one, read at your own pace.</p>
@@ -125,32 +124,32 @@
   <section id="outline" class="wrap section stack outline" style="gap:40px">
     <div class="stack" style="gap:16px">
       <p class="eyebrow">What you learn</p>
-      <h2><span data-total>61</span> lessons, the whole book.</h2>
-      <p class="body">Chapter by chapter, in the author's order, at <span data-minutes>5</span> minutes a lesson. Lesson counts are estimated from each chapter's length.</p>
+      <h2><span data-total>60</span> lessons, the whole book.</h2>
+      <p class="body">Chapter by chapter, in the author's order, at <span data-minutes>5</span> minutes a lesson. Days are estimated from each chapter's length; a lesson can run across a chapter break.</p>
     </div>
     <div class="inbox">
-      <div class="inbox-head"><span><span data-total>61</span> lessons, one a day</span><span>First 3 free</span></div>
-<div class="row" data-ch="0"><span class="day">Days 1–3</span><div class="row-text"><span class="subject">Chapter 1: The way of the program</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="1"><span class="day">Days 4–5</span><div class="row-text"><span class="subject">Chapter 2: Variables, expressions and statements</span><span class="preview" data-count>2 lessons</span></div></div>
-<div class="row row-locked" data-ch="2"><span class="day">Days 6–8</span><div class="row-text"><span class="subject">Chapter 3: Functions</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="3"><span class="day">Days 9–11</span><div class="row-text"><span class="subject">Chapter 4: Case study: interface design</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="4"><span class="day">Days 12–14</span><div class="row-text"><span class="subject">Chapter 5: Conditionals and recursion</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="5"><span class="day">Days 15–17</span><div class="row-text"><span class="subject">Chapter 6: Fruitful functions</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="6"><span class="day">Days 18–19</span><div class="row-text"><span class="subject">Chapter 7: Iteration</span><span class="preview" data-count>2 lessons</span></div></div>
-<div class="row row-locked" data-ch="7"><span class="day">Days 20–22</span><div class="row-text"><span class="subject">Chapter 8: Strings</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="8"><span class="day">Days 23–24</span><div class="row-text"><span class="subject">Chapter 9: Case study: word play</span><span class="preview" data-count>2 lessons</span></div></div>
-<div class="row row-locked" data-ch="9"><span class="day">Days 25–28</span><div class="row-text"><span class="subject">Chapter 10: Lists</span><span class="preview" data-count>4 lessons</span></div></div>
-<div class="row row-locked" data-ch="10"><span class="day">Days 29–31</span><div class="row-text"><span class="subject">Chapter 11: Dictionaries</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="11"><span class="day">Days 32–34</span><div class="row-text"><span class="subject">Chapter 12: Tuples</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="12"><span class="day">Days 35–38</span><div class="row-text"><span class="subject">Chapter 13: Case study: data structure selection</span><span class="preview" data-count>4 lessons</span></div></div>
-<div class="row row-locked" data-ch="13"><span class="day">Days 39–41</span><div class="row-text"><span class="subject">Chapter 14: Files</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="14"><span class="day">Days 42–43</span><div class="row-text"><span class="subject">Chapter 15: Classes and objects</span><span class="preview" data-count>2 lessons</span></div></div>
-<div class="row row-locked" data-ch="15"><span class="day">Days 44–45</span><div class="row-text"><span class="subject">Chapter 16: Classes and functions</span><span class="preview" data-count>2 lessons</span></div></div>
-<div class="row row-locked" data-ch="16"><span class="day">Days 46–48</span><div class="row-text"><span class="subject">Chapter 17: Classes and methods</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="17"><span class="day">Days 49–52</span><div class="row-text"><span class="subject">Chapter 18: Inheritance</span><span class="preview" data-count>4 lessons</span></div></div>
-<div class="row row-locked" data-ch="18"><span class="day">Days 53–55</span><div class="row-text"><span class="subject">Chapter 19: The Goodies</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="19"><span class="day">Days 56–58</span><div class="row-text"><span class="subject">Appendix A: Debugging</span><span class="preview" data-count>3 lessons</span></div></div>
-<div class="row row-locked" data-ch="20"><span class="day">Days 59–61</span><div class="row-text"><span class="subject">Appendix B: Analysis of algorithms</span><span class="preview" data-count>3 lessons</span></div></div>
+      <div class="inbox-head"><span><span data-total>60</span> lessons, one a day</span><span>First 3 free</span></div>
+<div class="row" data-ch="0"><span class="day">Days 1–3</span><div class="row-text"><span class="subject">Chapter 1: The way of the program</span><span class="preview">About 13 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="1"><span class="day">Days 3–5</span><div class="row-text"><span class="subject">Chapter 2: Variables, expressions and statements</span><span class="preview">About 10 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="2"><span class="day">Days 5–8</span><div class="row-text"><span class="subject">Chapter 3: Functions</span><span class="preview">About 16 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="3"><span class="day">Days 8–11</span><div class="row-text"><span class="subject">Chapter 4: Case study: interface design</span><span class="preview">About 14 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="4"><span class="day">Days 11–14</span><div class="row-text"><span class="subject">Chapter 5: Conditionals and recursion</span><span class="preview">About 16 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="5"><span class="day">Days 14–18</span><div class="row-text"><span class="subject">Chapter 6: Fruitful functions</span><span class="preview">About 17 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="6"><span class="day">Days 18–20</span><div class="row-text"><span class="subject">Chapter 7: Iteration</span><span class="preview">About 12 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="7"><span class="day">Days 20–23</span><div class="row-text"><span class="subject">Chapter 8: Strings</span><span class="preview">About 14 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="8"><span class="day">Days 23–25</span><div class="row-text"><span class="subject">Chapter 9: Case study: word play</span><span class="preview">About 10 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="9"><span class="day">Days 25–29</span><div class="row-text"><span class="subject">Chapter 10: Lists</span><span class="preview">About 18 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="10"><span class="day">Days 29–32</span><div class="row-text"><span class="subject">Chapter 11: Dictionaries</span><span class="preview">About 17 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="11"><span class="day">Days 32–35</span><div class="row-text"><span class="subject">Chapter 12: Tuples</span><span class="preview">About 14 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="12"><span class="day">Days 35–38</span><div class="row-text"><span class="subject">Chapter 13: Case study: data structure selection</span><span class="preview">About 18 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="13"><span class="day">Days 38–41</span><div class="row-text"><span class="subject">Chapter 14: Files</span><span class="preview">About 15 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="14"><span class="day">Days 41–43</span><div class="row-text"><span class="subject">Chapter 15: Classes and objects</span><span class="preview">About 10 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="15"><span class="day">Days 43–45</span><div class="row-text"><span class="subject">Chapter 16: Classes and functions</span><span class="preview">About 9 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="16"><span class="day">Days 45–48</span><div class="row-text"><span class="subject">Chapter 17: Classes and methods</span><span class="preview">About 14 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="17"><span class="day">Days 48–51</span><div class="row-text"><span class="subject">Chapter 18: Inheritance</span><span class="preview">About 18 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="18"><span class="day">Days 51–54</span><div class="row-text"><span class="subject">Chapter 19: The Goodies</span><span class="preview">About 13 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="19"><span class="day">Days 54–57</span><div class="row-text"><span class="subject">Appendix A: Debugging</span><span class="preview">About 15 minutes of reading</span></div></div>
+<div class="row row-locked" data-ch="20"><span class="day">Days 57–60</span><div class="row-text"><span class="subject">Appendix B: Analysis of algorithms</span><span class="preview">About 17 minutes of reading</span></div></div>
     </div>
   </section>
 
@@ -159,7 +158,7 @@
       <div class="stack" style="gap:20px">
         <p class="eyebrow" style="color:var(--band-muted)">The full course</p>
         <p class="price">$49</p>
-        <p class="body">One payment for all <span data-total>61</span> lessons. Start with the three free ones if you want to try it first.</p>
+        <p class="body">One payment for all <span data-total>60</span> lessons. Start with the three free ones if you want to try it first.</p>
       </div>
       <div class="stack" style="gap:24px">
         <ul>
@@ -195,21 +194,21 @@
 <script>
 var CHAPTER_WORDS = [2752, 2295, 3611, 3122, 3507, 3731, 2537, 2996, 2266, 3868, 3811, 3107, 3903, 3208, 2149, 1964, 2995, 3882, 2771, 3372, 3836], WPM = 220;
 function setLength(minutes) {
-  var day = 1, total = 0;
+  var all = CHAPTER_WORDS.reduce(function (a, b) { return a + b; }, 0);
+  var total = Math.max(1, Math.round(all / (minutes * WPM))), per = all / total, start = 0;
   document.querySelectorAll('.outline [data-ch]').forEach(function (row) {
-    var n = Math.max(1, Math.round(CHAPTER_WORDS[+row.dataset.ch] / (minutes * WPM)));
-    row.querySelector('.day').textContent = n === 1 ? 'Day ' + day : 'Days ' + day + '–' + (day + n - 1);
-    row.querySelector('[data-count]').textContent = n + (n === 1 ? ' lesson' : ' lessons');
-    day += n; total += n;
+    var w = CHAPTER_WORDS[+row.dataset.ch];
+    var first = Math.floor(start / per) + 1, last = Math.max(first, Math.min(total, Math.ceil((start + w) / per)));
+    row.querySelector('.day').textContent = first === last ? 'Day ' + first : 'Days ' + first + '–' + last;
+    start += w;
   });
   document.querySelectorAll('[data-total]').forEach(function (el) { el.textContent = total; });
   document.querySelectorAll('[data-minutes]').forEach(function (el) { el.textContent = minutes; });
-  document.querySelectorAll('[data-min]').forEach(function (b) { b.setAttribute('aria-pressed', String(+b.dataset.min === minutes)); });
+  slider.setAttribute('aria-valuetext', minutes + ' minutes');
   document.querySelector('input[name="minutes"]').value = minutes;
 }
-document.querySelectorAll('[data-min]').forEach(function (b) {
-  b.addEventListener('click', function () { setLength(+b.dataset.min); });
-});
+var slider = document.getElementById('length');
+slider.addEventListener('input', function () { setLength(+slider.value); });
 document.querySelectorAll('[data-demo]').forEach(function (el) {
   var note = document.getElementById(el.dataset.note);
   el.addEventListener(el.tagName === 'FORM' ? 'submit' : 'click', function (e) {

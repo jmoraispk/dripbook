@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>Hallucination, security, limits and lock-in</title>
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+<style>td,th,p,a,h2,h3,h4,strong,em{font-family:Georgia,'Times New Roman',serif !important} pre,code{font-family:'Courier New',monospace !important}</style><![endif]-->
+<!--[if !mso]><!--><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap"><!--<![endif]-->
+<style>
+:root{color-scheme:light dark;supported-color-schemes:light dark}
+body{margin:0!important;padding:0!important;width:100%!important;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}
+pre{white-space:pre!important;word-wrap:normal!important}
+@media (max-width:620px){.dm-pad{padding:24px 18px!important} .dm-title{font-size:26px!important}}
+@media (prefers-color-scheme: dark){.dm-bg{background:#0F1430!important}.dm-card{background:#171E3D!important;border-color:#3B4677!important}.dm-ink{color:#EFF2F7!important} .dm-muted{color:#B4BCD2!important}.dm-code{background:#1C2447!important;border-color:#2D3760!important;color:#EFF2F7!important}.dm-line{border-color:#2D3760!important} .dm-rule{border-color:#3B4677!important}.dm-soft{background:#2B2A2A!important}}
+[data-ogsc] .dm-bg{background:#0F1430!important} [data-ogsc] .dm-card{background:#171E3D!important;border-color:#3B4677!important} [data-ogsc] .dm-ink{color:#EFF2F7!important} [data-ogsc]  .dm-muted{color:#B4BCD2!important} [data-ogsc] .dm-code{background:#1C2447!important;border-color:#2D3760!important;color:#EFF2F7!important} [data-ogsc] .dm-line{border-color:#2D3760!important} [data-ogsc]  .dm-rule{border-color:#3B4677!important} [data-ogsc] .dm-soft{background:#2B2A2A!important}
+</style>
+</head>
+<body class="dm-bg" style="margin:0;padding:0;background:#EFF2F7">
+<div style="display:none;max-height:0;max-width:0;overflow:hidden;opacity:0;mso-hide:all">Claude Code can hallucinate in multi-step chains. A single step may produce correct output, but errors compound across a chain of ten or twenty&#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; &#8199;&#65279;&#847; </div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="dm-bg" style="background:#EFF2F7">
+<tr><td align="center" style="padding:24px 10px">
+<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%">
+<tr><td class="dm-muted" style="padding:0 6px 12px;font-family:'Schibsted Grotesk','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#4A5270">
+Day 7 &middot; Claude Code: From Basics to Mastery</td></tr>
+<tr><td class="dm-card dm-pad" style="background:#FFFFFF;border:1.5px solid #141B33;border-radius:20px;padding:36px 36px 32px">
+<h1 class="dm-ink dm-title" style="margin:0 0 20px;font-family:'Schibsted Grotesk','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:30px;line-height:1.15;font-weight:800;letter-spacing:-0.02em;color:#141B33">Hallucination, security, limits and lock-in</h1>
+
+<p class="dm-ink" style="margin:0 0 18px;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:19px;line-height:1.6;color:#141B33"><strong>Claude Code can hallucinate in multi-step chains.</strong> A single step may produce correct output, but errors compound across a chain of ten or twenty steps. A file that was supposed to be read in step three may have been edited by step five and Claude’s understanding of the codebase state becomes stale. This is why verification at each step is essential. Research by Huang et al. (2026) tested seven widely used MCP clients including Claude Code and found that tool-poisoning attacks can inject malicious instructions through data returned from connected external systems [14]. When Claude reads a GitHub README, a database query result, or a Slack message that contains embedded instructions, those instructions become part of its context and can manipulate its behavior.</p>
+<p class="dm-ink" style="margin:0 0 18px;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:19px;line-height:1.6;color:#141B33"><strong>Claude Code cannot make decisions about business requirements.</strong> It can implement what you ask for, but it cannot determine whether a feature should exist, which API design is optimal, or which tradeoffs are acceptable. These are human judgments. The research on 400,000 sessions confirms this: humans make roughly seventy percent of planning decisions while Claude handles about eighty percent of execution decisions [6].</p>
+<p class="dm-ink" style="margin:0 0 18px;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:19px;line-height:1.6;color:#141B33"><strong>Claude Code introduces real security risks to your development environment.</strong> As documented by Check Point Research, CVE-2025-59536 allowed remote code execution through malicious project configuration files before any trust dialog appeared and CVE-2026-21852 enabled API key theft via ANTHROPIC_BASE_URL manipulation [11]. These are documented vulnerabilities that affected real deployments and demonstrated how configuration files, traditionally treated as passive metadata, can become executable attack vectors.</p>
+<p class="dm-ink" style="margin:0 0 18px;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:19px;line-height:1.6;color:#141B33">Beyond Claude Code, the broader MCP ecosystem faces systemic security challenges. A vulnerability advisory from Ox Security (April 2026) identified that IDEs and coding assistants including Windsurf, Claude Code, Cursor, Gemini CLI and GitHub Copilot are vulnerable to command injection via their MCP JSON configuration files [17]. The only issued CVE at the time was for Windsurf, but the attack pattern applies across the ecosystem. NIST characterizes prompt injection as “generative AI’s greatest security flaw” and OWASP ranks it as the number one vulnerability in their LLM Applications Top 10 [35].</p>
+<p class="dm-ink" style="margin:0 0 18px;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:19px;line-height:1.6;color:#141B33"><strong>Claude Code has usage limits and compute constraints.</strong> In early 2026, many Pro plan users reported hitting usage limits within ten to fifteen minutes of using Sonnet, with Opus becoming unavailable shortly after starting [27]. Anthropic doubled usage limits in May 2026 in response to compute bottlenecks, but the fundamental constraint remains: Claude Code is a shared resource and heavy usage will eventually hit rate limits [39]. The Pro plan includes $20 per month of agent credits, Max 5x includes $100 and Max 20x includes $200 [2]. For sustained development work, most teams find that upgrading to Max 5x or higher is necessary to avoid interruptions.</p>
+<p class="dm-ink" style="margin:0 0 18px;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:19px;line-height:1.6;color:#141B33"><strong>Claude Code cannot replace human code review.</strong> Every AI-generated change should go through the same review process as developer-written code. Every AI-generated change touching security-critical files should require two reviewers. The agent is a collaborator, not an autonomous shipper [20]. This principle was reinforced by Stripe’s experience: Scott MacVicar, who leads Stripe’s developer infrastructure team, emphasized that treating AI as a replacement rather than a collaborator is the biggest challenge in adoption [8].</p>
+<p class="dm-ink" style="margin:0 0 18px;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:19px;line-height:1.6;color:#141B33"><strong>Vendor lock-in and ecosystem dependency.</strong> Claude Code is designed to work best with Anthropic models and integrates tightly with the Claude platform. While it uses open standards like MCP, migrating away from Claude Code to another agent or back to traditional development carries real costs: learned workflows, CLAUDE.md files, custom skills, hooks and MCP server configurations are all specific to Claude Code. Teams should evaluate whether the productivity gains outweigh the lock-in risk, especially for projects with long lifecycles.</p>
+<p class="dm-ink" style="margin:0 0 18px;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:19px;line-height:1.6;color:#141B33">These limitations are not weaknesses of Claude Code per se. They are characteristics of any system that delegates work to an LLM-based agent. Understanding them is the first step toward using Claude Code effectively and safely.</p>
+
+
+</td></tr>
+<tr><td class="dm-muted" style="padding:18px 6px 0;font-family:'Schibsted Grotesk','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#4A5270">
+From <em>Claude Code: From Basics to Mastery by Steve Publications</em>. Lesson 7 of 7.<br>
+<a href="#" class="dm-muted" style="color:#4A5270">Unsubscribe</a>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>
