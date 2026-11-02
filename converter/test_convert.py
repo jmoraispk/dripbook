@@ -743,6 +743,61 @@ class EditorCoreTests(unittest.TestCase):
             self.assertTrue(all("top" in b and "bottom" in b for b in course["all_blocks"]))
 
 
+class CutsTests(unittest.TestCase):
+    """cuts.json, which editor.html saves for a bare PDF, names positions on pages instead of block ids."""
+
+    def blocks(self):
+        spec = [(1, 100, "heading", "Contents"), (1, 200, "paragraph", "1 Start . . . 3"),
+                (3, 90, "heading", "Chapter 1\nStart"), (3, 200, "paragraph", "First words of the chapter"),
+                (3, 400, "paragraph", "A later paragraph"), (4, 80, "heading", "1.1 More"),
+                (4, 300, "paragraph", "Text under the section")]
+        return [{"id": f"p{page}.{i}", "page": page, "top": top, "type": kind, "text": text}
+                for i, (page, top, kind, text) in enumerate(spec, 1)]
+
+    def test_positions_become_block_ranges(self):
+        blocks = self.blocks()
+        cuts = {"settings": {"free_lessons": 1}, "segments": [
+            {"kind": "skip", "page": 1, "y": 0, "reason": "Contents"},
+            {"kind": "lesson", "page": 3, "y": 86, "subject": "Chapter 1: Start", "teaser": "1.1 More"},
+            {"kind": "lesson", "page": 3, "y": 380, "subject": ""},
+            {"kind": "lesson", "page": 4, "y": 120, "first_words": "1.1 More", "subject": "1.1 More"}]}
+        plan, warnings = convert.plan_from_cuts(cuts, blocks)
+        self.assertEqual(warnings, [])
+        self.assertEqual(convert.plan_errors(plan, blocks), [])
+        self.assertEqual(plan["skipped"], [{"first_block": "p1.1", "last_block": "p1.2", "reason": "Contents"}])
+        self.assertEqual([(l["first_block"], l["last_block"], l["subject"]) for l in plan["lessons"]],
+                         [("p3.3", "p3.4", "Chapter 1: Start"), ("p3.5", "p3.5", "Chapter 1: Start (continued)"),
+                          ("p4.6", "p4.7", "1.1 More")])
+        self.assertEqual(plan["settings"], {"free_lessons": 1})
+
+    def test_cuts_that_land_together_are_dropped(self):
+        blocks = self.blocks()
+        cuts = {"segments": [{"kind": "lesson", "page": 1, "y": 0, "subject": "A"},
+                             {"kind": "lesson", "page": 3, "y": 300, "subject": "B"},
+                             {"kind": "lesson", "page": 3, "y": 310, "subject": "C"}]}
+        plan, warnings = convert.plan_from_cuts(cuts, blocks)
+        self.assertEqual([l["subject"] for l in plan["lessons"]], ["A", "B"])
+        self.assertEqual(len(warnings), 1)
+
+    def test_main_renders_cuts(self):
+        raw = sample_book()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "book.pdf").write_bytes(b"%PDF")
+            blocks = convert.parse(raw)["blocks"]
+            cuts = {"settings": {"free_lessons": 1}, "segments": [
+                {"kind": "lesson", "page": blocks[0]["page"], "y": 0, "subject": "One"},
+                {"kind": "lesson", "page": blocks[5]["page"], "y": blocks[5]["top"] - 2, "subject": "Two"}]}
+            (tmp / "cuts.json").write_text(json.dumps(cuts))
+            with mock.patch.object(convert, "read_pdf", return_value=raw), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(convert.main([str(tmp / "book.pdf"), "--cuts", str(tmp / "cuts.json"),
+                                               "--out", str(tmp / "o")]), 0)
+            course = json.loads((tmp / "o" / "lessons.json").read_text())
+            self.assertEqual([l["subject"] for l in course["lessons"]], ["One", "Two"])
+            self.assertEqual(course["lessons"][1]["first_block"], blocks[5]["id"])
+            self.assertEqual(course["planned_by"], "cuts.json from editor.html")
+
+
 THINK_PYTHON = HERE / "output" / "thinkpython2.pdf"
 PLAN = HERE / "examples" / "think-python.plan.json"
 

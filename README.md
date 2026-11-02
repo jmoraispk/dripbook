@@ -122,11 +122,12 @@ Known limits: scanned PDFs (no OCR), two-column layouts, and math formulas, whic
 
 ### Cut editor
 
-`converter/editor.html` is a page for adjusting where each lesson starts and ends, on top of the automatic split. Open it in a browser straight from disk (no server), then choose or drop the book's PDF and its `lessons.json`. Nothing is uploaded.
+`converter/editor.html` is a page for cutting a book into lessons. Open it in a browser straight from disk (no server needed), then drop in a PDF. Nothing is uploaded: the PDF is read in the browser.
 
+- **A PDF on its own** (what an author would do): the page reads the text and starts with one lesson per chapter, using the PDF's bookmarks or else its largest headings. The front matter, contents and index are skipped. **Split long lessons** cuts every chapter over 6½ minutes at its sections. **Save cuts.json** downloads where each cut is, as a page and a height on it plus the first words after it. Render it with `uv run converter/extract_pymupdf.py book.pdf --cuts cuts.json`. Opening the PDF again with that `cuts.json` (or **Open saved cuts**) picks up where you left off.
+- **A PDF with its `lessons.json`** from the converter edits that plan instead, with the converter's own paragraphs and figures. **Save lessons.json** goes back through `--plan` (add the same `--pages` if you used it).
 - **Whole book:** every page as a thumbnail, with a coloured band per lesson, a line at each cut and the lesson list beside it. Skipped pages are hatched.
-- **One lesson:** its pages large, with its two cuts as black lines. Drag a line to move that cut; it snaps to the gaps between paragraphs, so text, code and figures are never split. Point at a page and click **Cut here** to split the lesson. You can also merge with the next or previous lesson, skip pages (like a title page), and edit the subject, intro and "Tomorrow" lines while seeing what readers get.
+- **One lesson:** its pages large, with its two cuts as black lines. Drag a line to move that cut; it snaps to the gaps between paragraphs. Point at a page and click **Cut here** to split the lesson. You can also merge with the next or previous lesson, skip pages, split at sections, and edit the subject, intro and "Tomorrow" lines while seeing what readers get.
 - Undo and redo, read times and warnings update as you go. Unsaved edits survive a reload.
-- **Save lessons.json** downloads the edited plan. Render it with `uv run converter/extract_pymupdf.py book.pdf --plan lessons.json` (add the same `--pages` if you used it).
 
 The cut logic is in `editor-core.js`, with tests in `test_editor_core.mjs`, which run as part of `python3 -m unittest discover -s converter` when Node.js is available (uv can fetch it). The page loads PDF.js from jsDelivr, so it needs an internet connection.

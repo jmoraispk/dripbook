@@ -16,6 +16,7 @@ read in a browser or sent as an email, plus a plain-text version.
   uv run converter/convert.py BOOK.pdf --pages 23-38            # use part of a PDF, e.g. skip the front matter
   uv run converter/convert.py BOOK.pdf --engine pymupdf         # read the PDF with PyMuPDF instead of pdfplumber
   uv run converter/convert.py BOOK.pdf --plan lessons.json      # render a plan you edited by hand
+  uv run converter/convert.py BOOK.pdf --cuts cuts.json         # render the cuts made in editor.html
   uv run converter/convert.py BOOK.pdf --blocks                 # print the numbered blocks a plan refers to
   uv run converter/convert.py https://example.com/sample.pdf    # a URL works too
 
@@ -810,6 +811,54 @@ def split_by_headings(blocks, target=900, most=1300, least=450):
     for lesson, following in zip(lessons, lessons[1:]):
         lesson["teaser"] = following["subject"][:MAX_LINE]
     return {"lessons": lessons, "skipped": skipped, "cta_note": "", "planned_by": "headings"}
+
+
+def block_at(blocks, page, y, words=""):
+    """The first block at or below height `y` on `page`, as editor.html places cuts.
+
+    With `words`, a block on that page whose text starts with them wins (the nearest
+    one), since the browser and this script measure positions a little differently.
+    """
+    def norm(text):
+        return " ".join(re.sub(r"[\W_]+", " ", str(text or "").lower()).split())
+    want = " ".join(norm(words).split()[:6])
+    if want:
+        hits = [j for j, b in enumerate(blocks)
+                if b["page"] == page and norm(b.get("text") or b.get("caption")).startswith(want)]
+        if hits:
+            return min(hits, key=lambda j: abs(blocks[j]["top"] - y))
+    return next((j for j, b in enumerate(blocks) if b["page"] > page or (b["page"] == page and b["top"] >= y - 3)),
+                len(blocks))
+
+
+def plan_from_cuts(cuts, blocks):
+    """Turn the cuts.json that editor.html saves into a plan. Returns (plan, warnings).
+
+    Each segment starts at a position on a page and runs until the next one starts.
+    A segment whose start lands on the same block as the one before it is dropped.
+    """
+    plan = {"book": cuts.get("book") or {}, "settings": cuts.get("settings") or {}, "source": cuts.get("source") or {},
+            "lessons": [], "skipped": [], "cta_note": "", "planned_by": "cuts.json from editor.html"}
+    starts, warnings = [], []
+    for n, c in enumerate(cuts.get("segments") or [], 1):
+        j = block_at(blocks, c["page"], c["y"], c.get("first_words", "")) if starts else 0
+        if j >= len(blocks) or (starts and j <= starts[-1][0]):
+            warnings.append(f"cut {n} (page {c['page']}) lands where the one before it does; dropped it")
+            continue
+        starts.append((j, c))
+    for (j, c), following in zip(starts, starts[1:] + [(len(blocks), None)]):
+        span = {"first_block": blocks[j]["id"], "last_block": blocks[following[0] - 1]["id"]}
+        if c.get("kind") == "skip":
+            plan["skipped"].append(dict(span, reason=str(c.get("reason") or "skipped in the editor")))
+            continue
+        subject = " ".join(str(c.get("subject") or "").split())
+        if not subject:
+            heading = next((b for b in reversed(blocks[:j + 1]) if b["type"] == "heading"), None)
+            subject = heading_label(heading["text"]) if heading else "Introduction"
+            subject += " (continued)" if heading and heading is not blocks[j] else ""
+        plan["lessons"].append(dict(span, subject=subject[:MAX_SUBJECT], lead_in=str(c.get("lead_in") or "")[:MAX_LINE],
+                                    teaser=str(c.get("teaser") or "")[:MAX_LINE]))
+    return plan, warnings
 
 
 def lesson_groups(blocks, target, most, least):
@@ -1746,6 +1795,7 @@ def main(argv=None):
     parser.add_argument("--engine", choices=sorted(ENGINES), default="pdfplumber",
                         help="library that reads the PDF (default: pdfplumber)")
     parser.add_argument("--plan", help="render this plan (a lessons.json) instead of splitting by headings")
+    parser.add_argument("--cuts", help="render the cuts.json saved by editor.html instead of splitting by headings")
     parser.add_argument("--target-words", type=int, default=900,
                         help="words per lesson when splitting by headings (default: 900, about 4 minutes)")
     parser.add_argument("--free", type=int,
@@ -1772,6 +1822,8 @@ def main(argv=None):
 
     if args.dry_run and not args.claude:
         parser.error("--dry-run only applies with --claude")
+    if sum(map(bool, (args.plan, args.cuts, args.claude))) > 1:
+        parser.error("use one of --plan, --cuts and --claude")
 
     pdf, url = fetch(args.source)
     print(f"Reading {pdf} with {args.engine}")
@@ -1797,6 +1849,15 @@ def main(argv=None):
         old = (raw.get("source") or {}).get("sha256")
         if old and old != sha:
             print("  warning: the plan was made from a different PDF file; checking it against this one")
+    elif args.cuts:
+        cuts = json.loads(Path(args.cuts).read_text(encoding="utf-8"))
+        old = (cuts.get("source") or {}).get("sha256")
+        if old and old != sha:
+            print("  warning: the cuts were made on a different PDF file; placing them on this one")
+        raw, problems = plan_from_cuts(cuts, doc["blocks"])
+        for p in problems:
+            print(f"  warning: {p}")
+        raw["book"] = {k: v for k, v in {**book, **raw["book"]}.items() if v}
     elif not args.claude:
         raw = split_by_headings(doc["blocks"], target=args.target_words, most=round(args.target_words * 1.45),
                                 least=round(args.target_words / 2))

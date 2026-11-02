@@ -52,6 +52,11 @@ main{flex:1;min-height:0;display:flex}
 .pick label.ok{border-color:var(--ink);background:var(--surface-2)}
 .pick input{position:absolute;opacity:0;width:1px;height:1px}
 .error{color:var(--red);font-weight:600}
+.status{font-weight:600}
+.status progress{width:100%;accent-color:var(--ribbon)}
+.pick label em{font-style:normal;font-weight:500;color:var(--muted)}
+label.btn{display:inline-flex;align-items:center;cursor:pointer}
+.note{font-size:13px;color:var(--muted);margin:0 0 10px}
 
 /* lesson list */
 .list{width:320px;flex:0 0 320px;overflow:auto;background:var(--surface);border-right:1px solid var(--line)}
@@ -155,6 +160,8 @@ main{flex:1;min-height:0;display:flex}
   <div class="tabs" id="tabs" hidden><button type="button" data-view="overview" aria-pressed="true">Whole book</button><button type="button" data-view="lesson" aria-pressed="false">One lesson</button></div>
   <button type="button" class="btn" id="undo" disabled hidden title="Undo (Ctrl+Z)">Undo</button>
   <button type="button" class="btn" id="redo" disabled hidden title="Redo (Ctrl+Shift+Z)">Redo</button>
+  <button type="button" class="btn" id="split-long" hidden title="Cut every lesson over 6½ minutes at its section headings">Split long lessons</button>
+  <label class="btn" id="open-cuts" hidden title="Put saved cuts back onto this book">Open saved cuts<input type="file" accept="application/json,.json" id="in-cuts" hidden></label>
   <label class="free" id="free-wrap" hidden>Free lessons <input type="number" id="free" min="1" max="99"></label>
   <button type="button" class="btn btn-primary" id="save" disabled hidden title="Save (Ctrl+S)">Save lessons.json</button>
 </header>
@@ -162,13 +169,13 @@ main{flex:1;min-height:0;display:flex}
 <main>
   <section id="start">
     <div class="drop" id="drop">
-      <h1>Adjust where each lesson starts and ends</h1>
-      <p>Open a book's PDF and the <code>lessons.json</code> the converter made for it. Drop both here, or choose them below. Nothing is uploaded; everything stays on this computer.</p>
+      <h1>Cut your book into daily lessons</h1>
+      <p>Drop your book's PDF here. It opens in this browser and stays on your computer: nothing is uploaded. We start you off with one lesson per chapter, and you move the cuts wherever you like.</p>
       <div class="pick">
         <label id="pick-pdf"><strong>Book PDF</strong><span>Choose a file…</span><input type="file" accept="application/pdf,.pdf" id="in-pdf"></label>
-        <label id="pick-plan"><strong>lessons.json</strong><span>Choose a file…</span><input type="file" accept="application/json,.json" id="in-plan"></label>
+        <label id="pick-plan"><strong>Saved cuts <em>(optional)</em></strong><span>cuts.json or lessons.json; choose it first</span><input type="file" accept="application/json,.json" id="in-plan"></label>
       </div>
-      <p>No <code>lessons.json</code> yet? Make one with <code>uv run converter/extract_pymupdf.py book.pdf</code>. It is in <code>converter/output/&lt;book&gt;-pymupdf/</code>.</p>
+      <p class="status" id="start-status" hidden></p>
       <p class="error" id="start-error" hidden></p>
     </div>
   </section>
@@ -191,7 +198,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<
 const dpr = () => Math.min(window.devicePixelRatio || 1, 2);
 
 const S = {
-  plan: null, blocks: [], segs: [], undo: [], redo: [], view: "overview", k: 0,
+  mode: "", plan: null, data: null, blocks: [], segs: [], undo: [], redo: [], view: "overview", k: 0,
   pdf: null, pdfName: "", sizes: new Map(), pages: [], sync: true, saved: true, key: "",
 };
 window.dripbookEditor = S;   // for poking at it from the browser console
@@ -243,16 +250,19 @@ async function pageImage(pageNo) {
 
 const picked = {pdf: null, plan: null};
 
-function pick(file) {
-  if (!file) return;
-  if (/\.pdf$/i.test(file.name) || file.type === "application/pdf") picked.pdf = file;
-  else if (/\.json$/i.test(file.name) || file.type === "application/json") picked.plan = file;
+// A PDF opens as soon as it's chosen; saved cuts chosen before it (or dropped with it) go with it.
+function pick(...files) {
+  for (const file of files) {
+    if (/\.pdf$/i.test(file.name) || file.type === "application/pdf") picked.pdf = file;
+    else if (/\.json$/i.test(file.name) || file.type === "application/json") picked.plan = file;
+  }
   $("#pick-pdf").classList.toggle("ok", !!picked.pdf);
   $("#pick-plan").classList.toggle("ok", !!picked.plan);
   if (picked.pdf) $("#pick-pdf span").textContent = picked.pdf.name;
   if (picked.plan) $("#pick-plan span").textContent = picked.plan.name;
-  if (picked.pdf && picked.plan) {
-    Promise.all([picked.pdf.arrayBuffer(), picked.plan.text()])
+  if (picked.pdf) {
+    $("#start-error").hidden = true;
+    Promise.all([picked.pdf.arrayBuffer(), picked.plan?.text()])
       .then(([data, text]) => open(new Uint8Array(data), picked.pdf.name, text))
       .catch(startError);
   }
@@ -260,9 +270,48 @@ function pick(file) {
 
 function startError(e) {
   console.error(e);
+  $("#start-status").hidden = true;
   const el = $("#start-error");
   el.textContent = e.message || String(e);
   el.hidden = false;
+}
+
+function status(html) {
+  const el = $("#start-status");
+  el.innerHTML = html;
+  el.hidden = !html;
+}
+
+// The book's text, read in this browser, and its top-level bookmarks.
+async function readBook() {
+  const pages = [];
+  const n = S.pdf.numPages;
+  for (let p = 1; p <= n; p++) {
+    const page = await S.pdf.getPage(p);
+    const vp = page.getViewport({scale: 1});
+    S.sizes.set(p, {w: vp.width, h: vp.height});
+    pages.push({number: p, width: vp.width, height: vp.height, items: C.itemsFromText(await page.getTextContent(), vp)});
+    if (p % 10 === 0 || p === n) status(`Reading page ${p} of ${n}…<br><progress max="${n}" value="${p}"></progress>`);
+  }
+  const outline = [];
+  try {
+    let entries = (await S.pdf.getOutline()) || [];
+    // a book in parts has few top-level bookmarks; its chapters are a level down
+    if (entries.length < 5 && entries.some((o) => o.items?.length)) entries = entries.flatMap((o) => (o.items?.length ? o.items : [o]));
+    for (const o of entries) {
+      let dest = o.dest;
+      if (typeof dest === "string") dest = await S.pdf.getDestination(dest);
+      if (!Array.isArray(dest)) continue;
+      const page = (typeof dest[0] === "object" ? await S.pdf.getPageIndex(dest[0]) : dest[0]) + 1;
+      const kind = dest[1]?.name;
+      const top = kind === "XYZ" ? dest[3] : /^FitB?H$/.test(kind) ? dest[2] : null;
+      const vp = (await S.pdf.getPage(page)).getViewport({scale: 1});
+      outline.push({title: o.title, page, y: top == null ? null : vp.convertToViewportPoint(0, top)[1]});
+    }
+  } catch (e) {
+    console.warn("Couldn't read the bookmarks", e);
+  }
+  return {blocks: C.blocksFromPages(pages), outline};
 }
 
 async function sha256(data) {
@@ -274,37 +323,74 @@ async function sha256(data) {
   }
 }
 
-async function open(data, pdfName, planText) {
-  const plan = JSON.parse(planText);
-  const {blocks, segs} = C.fromPlan(plan);
+// Two ways in. A PDF with the lessons.json the converter made for it edits that plan's
+// blocks and saves lessons.json ("plan" mode). A PDF on its own, or with a cuts.json saved
+// here before, is read in the browser and saves cuts.json ("pdf" mode).
+async function open(data, pdfName, jsonText) {
+  const json = jsonText ? JSON.parse(jsonText) : null;
+  if (json && !json.all_blocks && json.format !== "dripbook-cuts/1") {
+    throw new Error("That JSON file isn't a cuts.json or a lessons.json from the converter.");
+  }
+  const mode = json?.all_blocks ? "plan" : "pdf";
+  const fromPlan = mode === "plan" ? C.fromPlan(json) : null;
+  status("Opening the PDF…");
   const hash = await sha256(data);
   const lib = await pdfjs();
-  S.pdf = await lib.getDocument({data}).promise;
-  S.plan = plan;
-  S.plan.settings ??= {};
-  S.blocks = blocks;
-  S.segs = segs;
+  S.pdf = await lib.getDocument({data: data.slice()}).promise;   // PDF.js takes over the buffer it's given
+  S.data = data;
+  S.mode = mode;
   S.pdfName = pdfName;
+  S.sizes = new Map();
   S.undo = [];
   S.redo = [];
-  S.sync = JSON.stringify(C.syncTeasers(segs).map((s) => s.teaser)) === JSON.stringify(segs.map((s) => s.teaser));
-  const range = plan.source?.pages?.length === 2 ? plan.source.pages : [1, S.pdf.numPages];
-  const first = Math.max(1, Math.min(range[0], blocks[0].page)), last = Math.min(S.pdf.numPages, Math.max(range[1], C.endPage(blocks, segs.at(-1))));
-  S.pages = [];
-  for (let p = first; p <= last; p++) S.pages.push(p);
-  await Promise.all(S.pages.map(async (p) => {
-    const vp = (await S.pdf.getPage(p)).getViewport({scale: 1});
-    S.sizes.set(p, {w: vp.width, h: vp.height});
-  }));
-  S.key = "dripbook-cuts:" + (plan.source?.sha256 || hash || pdfName);
-  const warning = plan.source?.sha256 && hash && plan.source.sha256 !== hash
-    ? "This lessons.json was made from a different PDF file. Check that the cuts line up with the pages." : "";
+  S.k = 0;
+  pageImages.clear();
+  let warning = "";
+  if (mode === "plan") {
+    S.plan = json;
+    S.plan.settings ??= {};
+    S.blocks = fromPlan.blocks;
+    S.segs = fromPlan.segs;
+    const range = json.source?.pages?.length === 2 ? json.source.pages : [1, S.pdf.numPages];
+    const first = Math.max(1, Math.min(range[0], S.blocks[0].page));
+    const last = Math.min(S.pdf.numPages, Math.max(range[1], C.endPage(S.blocks, S.segs.at(-1))));
+    S.pages = [];
+    for (let p = first; p <= last; p++) S.pages.push(p);
+    await Promise.all(S.pages.map(async (p) => {
+      const vp = (await S.pdf.getPage(p)).getViewport({scale: 1});
+      S.sizes.set(p, {w: vp.width, h: vp.height});
+    }));
+  } else {
+    const {blocks, outline} = await readBook();
+    if (!blocks.length) throw new Error("This PDF has no text to read. It may be scanned pages, which need OCR first.");
+    const info = (await S.pdf.getMetadata().catch(() => null))?.info || {};
+    S.blocks = blocks;
+    S.segs = json ? C.fromCuts(json, blocks) : C.defaultSegments(blocks, C.chapterStarts(blocks, outline));
+    S.plan = {
+      book: {title: json?.book?.title || info.Title || pdfName.replace(/\.pdf$/i, ""), author: json?.book?.author || info.Author || ""},
+      source: {file: pdfName, sha256: hash, page_count: S.pdf.numPages},
+      settings: {free_lessons: json?.settings?.free_lessons || 3},
+    };
+    S.pages = Array.from({length: S.pdf.numPages}, (_, i) => i + 1);
+  }
+  const madeFrom = json?.source?.sha256;
+  if (madeFrom && hash && madeFrom !== hash) {
+    warning = `This ${mode === "plan" ? "lessons.json" : "cuts.json"} was made from a different PDF file. Check that the cuts line up with the pages.`;
+  }
+  S.sync = JSON.stringify(C.syncTeasers(S.segs).map((s) => s.teaser)) === JSON.stringify(S.segs.map((s) => s.teaser));
+  S.saved = mode === "plan" || !!json;
+  S.key = `dripbook-cuts:${mode}:` + (hash || pdfName);
+  status("");
   $("#start").hidden = true;
-  for (const id of ["#tabs", "#free-wrap", "#undo", "#redo", "#save"]) $(id).hidden = false;
+  for (const id of ["#tabs", "#free-wrap", "#undo", "#redo", "#save", "#split-long", "#open-cuts"]) $(id).hidden = false;
   $("#free").value = S.plan.settings.free_lessons || 3;
+  shownPages = "";
   buildOverview();
   setView("overview");
   if (warning) toast(warning, 8000);
+  else if (mode === "pdf" && !json) {
+    toast(`We cut the book at its chapters: ${C.stats(S.blocks, S.segs).lessons} lessons. Click one to adjust it, or try <strong>Split long lessons</strong>.`, 7000);
+  }
   offerDraft();
 }
 
@@ -376,21 +462,29 @@ function offerDraft() {
   };
 }
 
+const saveName = () => (S.mode === "plan" ? "lessons.json" : "cuts.json");
+
 function save() {
-  const plan = C.toPlan(S.plan, S.blocks, S.segs);
-  const blob = new Blob([JSON.stringify(plan, null, 2) + "\n"], {type: "application/json"});
+  const out = S.mode === "plan" ? C.toPlan(S.plan, S.blocks, S.segs) : C.toCuts(S.plan, S.blocks, S.segs);
+  const blob = new Blob([JSON.stringify(out, null, 2) + "\n"], {type: "application/json"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "lessons.json";
+  a.download = saveName();
   document.body.append(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   S.saved = true;
   refreshBar();
-  const engine = S.plan.source?.engine || "pymupdf";
-  const pages = S.plan.source?.pages ? ` --pages ${S.plan.source.pages[0]}-${S.plan.source.pages[1]}` : "";
-  toast(`Saved lessons.json. Render the pages from it with<br><code>uv run converter/extract_${esc(engine)}.py ${esc(S.pdfName)}${pages} --plan lessons.json</code>`, 12000);
+  const local = location.protocol === "file:" || /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  if (S.mode === "plan") {
+    const engine = S.plan.source?.engine || "pymupdf";
+    const pages = S.plan.source?.pages ? ` --pages ${S.plan.source.pages[0]}-${S.plan.source.pages[1]}` : "";
+    toast(`Saved lessons.json. Render the pages from it with<br><code>uv run converter/extract_${esc(engine)}.py ${esc(S.pdfName)}${pages} --plan lessons.json</code>`, 12000);
+  } else {
+    toast(`Saved cuts.json to your downloads. Send it to us together with your PDF.` +
+      (local ? `<br>Render it with <code>uv run converter/extract_pymupdf.py ${esc(S.pdfName)} --cuts cuts.json</code>` : ""), 12000);
+  }
 }
 
 // ------------------------------------------------------------------ views
@@ -425,7 +519,7 @@ function refreshBar() {
   $("#undo").disabled = !S.undo.length;
   $("#redo").disabled = !S.redo.length;
   $("#save").disabled = false;
-  $("#save").textContent = S.saved ? "Save lessons.json" : "Save lessons.json •";
+  $("#save").textContent = `Save ${saveName()}${S.saved ? "" : " •"}`;
 }
 
 function pagesOf(seg) {
@@ -511,7 +605,9 @@ let shownPages = "";
 function renderLesson(scroll) {
   const seg = S.segs[S.k];
   const [p1, p2] = pagesOf(seg);
-  const first = Math.max(S.pages[0], p1 - 1), last = Math.min(S.pages.at(-1), p2 + 1);
+  // one page either side, and as far as the next cut when blank pages come before it
+  const next = seg.b + 1 < S.blocks.length ? C.boundaryPos(S.blocks, seg.b + 1).page : p2;
+  const first = Math.max(S.pages[0], p1 - 1), last = Math.min(S.pages.at(-1), Math.max(p2 + 1, next));
   const wanted = `${first}-${last}`;
   const pagesEl = $("#pages");
   if (wanted !== shownPages) {
@@ -688,15 +784,18 @@ function renderPanel() {
     <div class="field"><label for="f-lead">Intro line <span>optional</span></label><input type="text" id="f-lead" data-field="lead_in" maxlength="220" value="${esc(seg.lead_in)}"></div>
     <div class="field"><label for="f-teaser">Tomorrow line <span class="sync"><input type="checkbox" id="f-sync" ${S.sync ? "checked" : ""}> same as next subject</span></label>
       <input type="text" id="f-teaser" data-field="teaser" maxlength="220" value="${esc(seg.teaser)}" ${S.sync ? "disabled" : ""}></div>`}
-    <p class="facts">${C.words(S.blocks, seg).toLocaleString()} words${skip ? "" : `, about ${C.minutes(S.blocks, seg)} minutes`} · ${p2 !== p1 ? `pages ${p1}–${p2}` : `page ${p1}`} · blocks ${esc(S.blocks[seg.a].id)} to ${esc(S.blocks[seg.b].id)}</p>
+    <p class="facts">${C.words(S.blocks, seg).toLocaleString()} words${skip ? "" : `, about ${C.minutes(S.blocks, seg)} minutes`} · ${p2 !== p1 ? `pages ${p1}–${p2}` : `page ${p1}`}${S.mode === "plan" ? ` · blocks ${esc(S.blocks[seg.a].id)} to ${esc(S.blocks[seg.b].id)}` : ""}</p>
     ${w.length ? `<p class="warn">${w.map(esc).join("<br>")}</p>` : ""}
     <div class="actions">
       <button type="button" class="btn btn-small" data-act="merge-prev" ${S.k === 0 ? "disabled" : ""}>Merge with previous</button>
       <button type="button" class="btn btn-small" data-act="merge-next" ${S.k === S.segs.length - 1 ? "disabled" : ""}>Merge with next</button>
-      ${skip ? `<button type="button" class="btn btn-small" data-act="lesson">Make it a lesson</button>` : `<button type="button" class="btn btn-small" data-act="skip">Skip these pages</button>`}
+      ${skip ? `<button type="button" class="btn btn-small" data-act="lesson">Make it a lesson</button>` : `<button type="button" class="btn btn-small" data-act="skip">Skip these pages</button>
+      <button type="button" class="btn btn-small" data-act="sections" title="Cut this lesson at its section headings into parts of about 4 minutes">Split at sections</button>`}
     </div>
     <p class="help">Drag a black line to move that cut; it snaps to the gaps between paragraphs. To cut this ${skip ? "part" : "lesson"} in two, point at the page and click <strong>Cut here</strong> on the blue line.</p>
-    <div class="reader"><h3 class="rt">${skip ? "Text in this part" : "What readers get"}</h3><div class="email" id="email"></div></div>`;
+    <div class="reader"><h3 class="rt">${skip ? "Text in this part" : "What readers get"}</h3>
+      ${S.mode === "pdf" ? `<p class="note">A quick preview without images. The finished lessons are made from the PDF itself.</p>` : ""}
+      <div class="email" id="email"></div></div>`;
   renderEmail($("#email"), seg, skip);
   if (typing) {
     const el = panel.querySelector(`[data-field="${typing}"]`);
@@ -713,6 +812,7 @@ $("#panel").addEventListener("click", (e) => {
   if (act === "merge-next") apply(C.merge(S.segs, S.k));
   if (act === "skip") apply(C.setKind(S.segs, S.k, "skip", S.blocks));
   if (act === "lesson") apply(C.setKind(S.segs, S.k, "lesson", S.blocks));
+  if (act === "sections") apply(C.splitAtSections(S.segs, S.k, S.blocks), "This lesson has no section headings to split at, or it's already short.");
 });
 
 let editSnapshot = null;
@@ -810,6 +910,31 @@ $("#tabs").addEventListener("click", (e) => {
 $("#undo").onclick = undo;
 $("#redo").onclick = redo;
 $("#save").onclick = save;
+$("#split-long").onclick = () => {
+  const before = C.stats(S.blocks, S.segs).lessons;
+  if (apply(C.splitLong(S.segs, S.blocks), "No lesson is long enough to split at its sections.")) {
+    toast(`Split long lessons at their sections: ${before} lessons became ${C.stats(S.blocks, S.segs).lessons}. Undo puts them back.`);
+  }
+};
+$("#in-cuts").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const json = JSON.parse(await file.text());
+    if (json.all_blocks) {   // a converter plan brings its own blocks, so the book opens again with it
+      await open(S.data, S.pdfName, JSON.stringify(json));
+      return;
+    }
+    if (json.format !== "dripbook-cuts/1") throw new Error("That file isn't a cuts.json or a lessons.json.");
+    if (S.mode !== "pdf") throw new Error("Open the PDF on its own to use a cuts.json.");
+    if (json.settings?.free_lessons) { S.plan.settings.free_lessons = json.settings.free_lessons; $("#free").value = json.settings.free_lessons; }
+    apply(C.fromCuts(json, S.blocks));
+    toast(`Opened ${esc(file.name)}.`);
+  } catch (err) {
+    toast(esc(err.message || err), 6000);
+  }
+});
 $("#free").addEventListener("change", (e) => {
   const n = Math.max(1, Math.round(Number(e.target.value) || 1));
   e.target.value = n;
@@ -833,24 +958,24 @@ window.addEventListener("beforeunload", (e) => {
   if (S.plan && !S.saved) { e.preventDefault(); e.returnValue = ""; }
 });
 
-$("#in-pdf").addEventListener("change", (e) => pick(e.target.files[0]));
-$("#in-plan").addEventListener("change", (e) => pick(e.target.files[0]));
+$("#in-pdf").addEventListener("change", (e) => pick(...e.target.files));
+$("#in-plan").addEventListener("change", (e) => pick(...e.target.files));
 const drop = $("#drop");
 for (const type of ["dragenter", "dragover"]) drop.addEventListener(type, (e) => { e.preventDefault(); drop.classList.add("over"); });
 for (const type of ["dragleave", "drop"]) drop.addEventListener(type, () => drop.classList.remove("over"));
 drop.addEventListener("drop", (e) => {
   e.preventDefault();
-  [...e.dataTransfer.files].forEach(pick);
+  pick(...e.dataTransfer.files);
 });
 
-// ?pdf=…&plan=… loads files by URL when this page is served over http (also used for testing).
+// ?pdf=…[&plan=…] loads files by URL when this page is served over http (also used for testing).
 const params = new URLSearchParams(location.search);
-if (params.get("pdf") && params.get("plan")) {
+if (params.get("pdf")) {
   (async () => {
     try {
-      const [pdf, plan] = await Promise.all([fetch(params.get("pdf")), fetch(params.get("plan"))]);
-      if (!pdf.ok || !plan.ok) throw new Error("Couldn't load the files named in the address.");
-      await open(new Uint8Array(await pdf.arrayBuffer()), params.get("pdf").split("/").pop(), await plan.text());
+      const [pdf, plan] = await Promise.all([fetch(params.get("pdf")), params.get("plan") && fetch(params.get("plan"))]);
+      if (!pdf.ok || (plan && !plan.ok)) throw new Error("Couldn't load the files named in the address.");
+      await open(new Uint8Array(await pdf.arrayBuffer()), params.get("pdf").split("/").pop(), plan ? await plan.text() : null);
       if (params.get("day")) {
         const k = C.days(S.segs).indexOf(Number(params.get("day")));
         if (k >= 0) setView("lesson", k);
@@ -880,8 +1005,13 @@ function selfTest() {
   redo();
   check("redo", S.segs.length === before + 1);
   check("merge back", apply(C.merge(S.segs, 1)) && S.segs.length === before);
-  const plan = C.toPlan(S.plan, S.blocks, S.segs);
-  check("saved plan covers the book", plan.lessons.length + plan.skipped.length === S.segs.length && plan.all_blocks.length === S.blocks.length);
+  if (S.mode === "plan") {
+    const plan = C.toPlan(S.plan, S.blocks, S.segs);
+    check("saved plan covers the book", plan.lessons.length + plan.skipped.length === S.segs.length && plan.all_blocks.length === S.blocks.length);
+  } else {
+    const back = C.fromCuts(C.toCuts(S.plan, S.blocks, S.segs), S.blocks);
+    check("saved cuts read back the same", JSON.stringify(back.map((x) => [x.a, x.b])) === JSON.stringify(S.segs.map((x) => [x.a, x.b])));
+  }
   check("lesson view shows both cuts", document.querySelectorAll("#pages .handle").length >= 1);
   const inside = S.pages.flatMap((p) => C.boundariesOnPage(S.blocks, p)).filter((c) => c.j > S.segs[1].a && c.j <= S.segs[1].b);
   check("lesson has places to cut", inside.length > 0);

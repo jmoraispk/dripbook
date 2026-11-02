@@ -114,3 +114,89 @@ test("writes the plan back with block ids, keeping the book's details", () => {
   assert.equal(out.all_blocks.length, 9);
   assert.equal(out.planned_by, "edited in editor.html");
 });
+
+// ------------------------------------------------------------- a bare PDF, read in the browser
+
+// A five-page book as PDF.js would give it: [text, base, size, x, mono] per item.
+function pdfPages() {
+  const items = (rows) => rows.map(([text, base, size = 10, x = 72, mono = false]) => ({text, base, size, x, w: text.length * size * 0.5, mono}));
+  const full = (s) => s.padEnd(80, " filler words");
+  return [
+    {number: 1, width: 600, height: 800, items: items([["My Book", 300, 30]])},
+    {number: 2, width: 600, height: 800, items: items([["Contents", 100, 24],
+      ...[1, 2, 3, 4, 5, 6].map((n) => [`${n} Section . . . . . . . . ${n + 2}`, 150 + n * 14])])},
+    {number: 3, width: 600, height: 800, items: items([["3 My Book", 40], ["Chapter 1", 120, 20], ["Start", 170, 25],
+      [full("The first paragraph"), 220], [full("goes on"), 232], ["and ends.", 244],
+      ["x = 1", 262, 10, 82, true], ["print(x)", 274, 10, 82, true],
+      [full("A second paragraph"), 300], ["that runs onto the next", 312], ["3", 760]])},
+    {number: 4, width: 600, height: 800, items: items([["4 My Book", 40], ["page, where it ends.", 80],
+      ["1.1 More", 120, 14], [full("Text under the section"), 140], ["ends.", 152],
+      ["Chapter 2", 300, 20], ["Next", 350, 25], ["Words of chapter two.", 400], ["4", 760]])},
+    {number: 5, width: 600, height: 800, items: items([["5 My Book", 40], ["Index", 100, 24],
+      ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => [`term${n}, ${n}, ${n + 3}`, 150 + n * 14]), ["5", 760]])},
+  ];
+}
+
+test("joins a line's pieces with spaces where there's a gap", () => {
+  const [line] = C.linesFromItems([
+    {text: "two", x: 40, w: 15, base: 100, size: 10, mono: false},
+    {text: "One", x: 10, w: 15, base: 100.4, size: 10, mono: false},
+    {text: "x()", x: 60, w: 15, base: 100, size: 10, mono: true},
+  ]);
+  assert.equal(line.text, "One two x()");
+  assert.equal(line.mono, false);
+});
+
+test("reads pages into headings, paragraphs and code, without running heads", () => {
+  const blocks = C.blocksFromPages(pdfPages());
+  const p3 = blocks.filter((b) => b.page === 3);
+  assert.deepEqual(p3.map((b) => b.type), ["heading", "paragraph", "code", "paragraph"]);
+  assert.equal(p3[0].text, "Chapter 1\nStart", "a chapter label joins the title below it");
+  assert.equal(p3[2].text, "x = 1\nprint(x)");
+  assert.ok(!blocks.some((b) => /My Book$/.test(b.text) && b.page > 1), "running heads are dropped");
+  assert.ok(!blocks.some((b) => /^\d$/.test(b.text)), "page numbers are dropped");
+  const carried = blocks.find((b) => /runs onto the next/.test(b.text));
+  assert.equal(carried.type, "paragraph");
+  assert.match(carried.text, /next page, where it ends\.$/, "a paragraph carries on over a page break");
+  assert.equal(carried.end_page, 4);
+  assert.ok(blocks.filter((b) => b.page === 2).every((b) => b.aside === "Contents"));
+  assert.ok(blocks.filter((b) => b.page === 5).every((b) => b.aside === "Index"));
+  const more = blocks.find((b) => b.text === "1.1 More");
+  assert.ok(more.level > blocks.find((b) => b.text === "Chapter 1\nStart").level, "smaller headings get deeper levels");
+});
+
+test("cuts a bare PDF into one lesson per chapter, skipping the front matter, contents and index", () => {
+  const blocks = C.blocksFromPages(pdfPages());
+  const fromHeadings = C.chapterStarts(blocks, []);
+  const fromOutline = C.chapterStarts(blocks, [{title: "Start", page: 3, y: 60}, {title: "Next", page: 4, y: null}]);
+  assert.deepEqual(fromOutline, fromHeadings, "bookmarks and headings find the same chapters");
+  const segs = C.defaultSegments(blocks, fromOutline);
+  assert.deepEqual(segs.map((s) => [s.kind, s.subject || s.reason]), [
+    ["skip", "Before the first chapter"], ["skip", "Contents"], ["lesson", "Chapter 1: Start"],
+    ["lesson", "Chapter 2: Next"], ["skip", "Index"]]);
+  assert.equal(segs[2].teaser, "Chapter 2: Next");
+  assert.equal(segs.at(-1).b, blocks.length - 1);
+});
+
+test("splits a long lesson at its sections", () => {
+  const blocks = C.blocksFromPages(pdfPages());
+  const segs = C.defaultSegments(blocks, C.chapterStarts(blocks, []));
+  const k = segs.findIndex((s) => s.subject === "Chapter 1: Start");
+  const out = C.splitAtSections(segs, k, blocks, 20);
+  assert.deepEqual(out.slice(k, k + 2).map((s) => s.subject), ["Chapter 1: Start", "1.1 More"]);
+  assert.equal(C.splitAtSections(segs, k, blocks, 10000), null, "nothing to split when the lesson is short");
+});
+
+test("cuts.json records positions, and reads back onto the same blocks", () => {
+  const blocks = C.blocksFromPages(pdfPages());
+  const segs = C.defaultSegments(blocks, C.chapterStarts(blocks, []));
+  const cuts = C.toCuts({book: {title: "My Book"}, settings: {free_lessons: 1}}, blocks, segs);
+  assert.equal(cuts.format, "dripbook-cuts/1");
+  assert.deepEqual(cuts.segments.map((c) => c.kind), segs.map((s) => s.kind));
+  const chapter2 = cuts.segments[3];
+  assert.equal(chapter2.page, 4);
+  assert.equal(chapter2.first_words, "Chapter 2 Next");
+  assert.deepEqual(C.fromCuts(cuts, blocks).map((s) => [s.a, s.b, s.subject]), segs.map((s) => [s.a, s.b, s.subject]));
+  chapter2.y += 40;   // a reader that measures positions a little differently still finds the block by its words
+  assert.equal(C.fromCuts(cuts, blocks)[3].a, segs[3].a);
+});
