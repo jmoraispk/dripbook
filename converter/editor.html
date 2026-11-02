@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dripbook cut editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap">
+<style>
+:root{color-scheme:light;--paper:#EFF2F7;--surface:#FFFFFF;--surface-2:#F7F8FB;--ink:#141B33;--muted:#4A5270;--line:#CDD4E2;
+--ribbon:#F4B425;--ribbon-soft:#FFF6DE;--blue:#4F6BD8;--red:#C2410C;--band-a:rgba(244,180,37,.24);--band-b:rgba(79,107,216,.16);
+--sans:'Schibsted Grotesk','Helvetica Neue',Helvetica,Arial,sans-serif;--serif:'Newsreader',Georgia,'Times New Roman',serif;
+--mono:'SFMono-Regular',Menlo,Consolas,'Liberation Mono',monospace}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;display:flex;flex-direction:column}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+[hidden]{display:none!important}
+
+/* top bar */
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:12px 20px;background:var(--surface);border-bottom:1.5px solid var(--ink)}
+.brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:18px;letter-spacing:-.02em;white-space:nowrap}
+.brand svg{stroke:var(--ink)}
+.book{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:28ch}
+.stats{color:var(--muted);font-size:14px}
+.spacer{flex:1}
+.tabs{display:flex;border:1.5px solid var(--ink);border-radius:999px;overflow:hidden}
+.tabs button{border:0;background:var(--surface);padding:7px 14px;font-weight:600}
+.tabs button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.btn{border:1.5px solid var(--ink);background:var(--surface);border-radius:999px;padding:7px 14px;font-weight:600;white-space:nowrap}
+.btn:disabled{opacity:.35;cursor:default}
+.btn-primary{background:var(--ribbon);border-color:var(--ribbon);font-weight:700}
+.btn-small{padding:4px 10px;font-size:13px}
+.free{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--muted)}
+.free input{width:52px;border:1.5px solid var(--line);border-radius:8px;padding:5px 6px}
+
+main{flex:1;min-height:0;display:flex}
+
+/* start */
+#start{flex:1;display:flex;align-items:center;justify-content:center;padding:32px 16px}
+.drop{max-width:620px;width:100%;background:var(--surface);border:2px dashed var(--ribbon);border-radius:20px;padding:36px 32px;display:flex;flex-direction:column;gap:18px}
+.drop.over{background:var(--ribbon-soft)}
+.drop h1{margin:0;font-size:30px;letter-spacing:-.03em;line-height:1.1}
+.drop p{margin:0;color:var(--muted);line-height:1.55}
+.drop code{font-family:var(--mono);font-size:13px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:2px 6px}
+.pick{display:flex;flex-wrap:wrap;gap:12px}
+.pick label{flex:1 1 220px;border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;display:flex;flex-direction:column;gap:4px}
+.pick label strong{font-size:15px}
+.pick label span{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick label.ok{border-color:var(--ink);background:var(--surface-2)}
+.pick input{position:absolute;opacity:0;width:1px;height:1px}
+.error{color:var(--red);font-weight:600}
+
+/* lesson list */
+.list{width:320px;flex:0 0 320px;overflow:auto;background:var(--surface);border-right:1px solid var(--line)}
+.row{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.row:hover{background:var(--surface-2)}
+.row.active{background:var(--ribbon-soft)}
+.day{flex:0 0 auto;min-width:50px;text-align:center;font-size:12px;font-weight:700;background:var(--ink);color:var(--paper);border-radius:6px;padding:3px 6px}
+.row.skip .day{background:var(--line);color:var(--muted)}
+.row-main{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.subj{font-weight:600;font-size:14px;line-height:1.3}
+.row.skip .subj{color:var(--muted);font-weight:500}
+.meta{font-size:12.5px;color:var(--muted)}
+.flag{color:var(--red);font-weight:600}
+.badge{font-size:11px;font-weight:700;background:var(--ribbon);border-radius:4px;padding:1px 5px;margin-left:4px}
+
+/* overview */
+#overview{flex:1;min-width:0;display:flex}
+.grid{flex:1;overflow:auto;padding:18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:18px;align-content:start}
+.card{display:flex;flex-direction:column;gap:5px}
+.pno{font-size:12px;color:var(--muted);text-align:center}
+.sheet{position:relative;background:#fff;box-shadow:0 1px 2px rgba(20,27,51,.18);border-radius:3px;overflow:hidden}
+.sheet canvas{display:block;width:100%;height:100%}
+.ov{position:absolute;inset:0}
+.band{position:absolute;left:0;right:0;cursor:pointer}
+.band.a{background:var(--band-a)}
+.band.b{background:var(--band-b)}
+.band.skip{background:repeating-linear-gradient(135deg,rgba(74,82,112,.20) 0 6px,rgba(74,82,112,.06) 6px 12px)}
+.band.hot{outline:2px solid var(--ink);outline-offset:-2px}
+.cut{position:absolute;left:0;right:0;height:0;border-top:2px solid var(--ink);pointer-events:none}
+.chip{position:absolute;left:4px;transform:translateY(-50%);font-size:10.5px;font-weight:700;background:var(--ink);color:var(--paper);border-radius:4px;padding:1px 5px;pointer-events:auto;cursor:pointer;white-space:nowrap}
+.chip.skip{background:var(--muted)}
+
+/* lesson view */
+#lesson{flex:1;min-width:0;display:flex}
+.pages{flex:1;min-width:0;overflow:auto;padding:20px;display:flex;flex-direction:column;align-items:center;gap:20px}
+.pg{position:relative;width:100%;max-width:820px}
+.pg .sheet{border-radius:4px}
+.pg .ov .band{cursor:default}
+.pg .band.dim{opacity:.45}
+.pg-label{font-size:12px;color:var(--muted);margin:0 0 4px}
+.handle{position:absolute;left:-6px;right:-6px;height:0;border-top:3px solid var(--ink);cursor:ns-resize;z-index:3}
+.handle::before{content:"";position:absolute;left:0;right:0;top:-10px;height:20px}
+.handle span{position:absolute;right:8px;top:0;transform:translateY(-50%);background:var(--ink);color:var(--paper);font-size:12px;font-weight:700;border-radius:999px;padding:4px 10px;white-space:nowrap;box-shadow:0 2px 6px rgba(20,27,51,.25)}
+.handle.dragging{border-top-style:dashed;opacity:.5}
+.ghost{position:absolute;left:-6px;right:-6px;height:0;border-top:3px solid var(--ribbon);z-index:4;pointer-events:none}
+.ghost span{position:absolute;left:8px;top:0;transform:translateY(-50%);background:var(--ribbon);font-size:12px;font-weight:700;border-radius:999px;padding:4px 10px;white-space:nowrap;max-width:70%;overflow:hidden;text-overflow:ellipsis}
+.hover-cut{position:absolute;left:0;right:0;height:0;border-top:2px dashed var(--blue);z-index:2;pointer-events:none}
+.hover-cut button{position:absolute;right:8px;top:0;transform:translateY(-50%);border:0;background:var(--blue);color:#fff;font-size:12px;font-weight:700;border-radius:999px;padding:4px 11px;pointer-events:auto;box-shadow:0 2px 6px rgba(20,27,51,.25)}
+
+.panel{width:440px;flex:0 0 440px;overflow:auto;background:var(--surface);border-left:1px solid var(--line);padding:18px 20px 40px;display:flex;flex-direction:column;gap:14px}
+.nav{display:flex;align-items:center;gap:8px}
+.nav h2{margin:0;font-size:22px;letter-spacing:-.02em;flex:1}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:13px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+.field input[type=text]{border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;width:100%}
+.field input:focus{outline:2px solid var(--ribbon);border-color:var(--ink)}
+.field input:disabled{background:var(--surface-2);color:var(--muted)}
+.sync{font-weight:500}
+.facts{font-size:14px;color:var(--muted);line-height:1.5}
+.warn{margin:0;padding:10px 12px;border-radius:10px;background:#FFF1EA;color:var(--red);font-size:13.5px;font-weight:600;display:flex;flex-direction:column;gap:3px}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.help{font-size:13px;color:var(--muted);line-height:1.5;margin:0}
+.reader{border-top:1.5px solid var(--ink);padding-top:14px}
+.reader h3.rt{margin:0 0 4px;font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.email{font-family:var(--serif);font-size:16.5px;line-height:1.6}
+.email .subject{font-family:var(--sans);font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.2;margin:8px 0 10px}
+.email .lead{font-style:italic;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:10px}
+.email h4{font-family:var(--sans);font-size:17px;margin:18px 0 6px;line-height:1.3}
+.email p{margin:0 0 12px}
+.email .fn{font-size:13.5px;color:var(--muted)}
+.email .quote{border-left:3px solid var(--ribbon);padding-left:12px}
+.email pre{font-family:var(--mono);font-size:12.5px;line-height:1.5;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-x:auto;white-space:pre;margin:0 0 12px}
+.email code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:0 3px}
+.email .li{display:flex;gap:8px;margin:0 0 6px}
+.email .li .m{flex:0 0 auto;min-width:1.2em}
+.email figure{margin:4px 0 14px;text-align:center}
+.email figure canvas{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;padding:6px}
+.email figcaption{font-family:var(--sans);font-size:13px;color:var(--muted)}
+.email .tomorrow{font-family:var(--sans);border-top:1.5px solid var(--ink);padding-top:10px;margin-top:6px;font-size:15px}
+
+/* banners */
+.banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 20px;background:var(--ribbon-soft);border-bottom:1px solid var(--line);font-size:14px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:12px;font-size:14px;max-width:min(680px,92vw);box-shadow:0 6px 24px rgba(20,27,51,.3);z-index:20}
+.toast code{font-family:var(--mono);font-size:12.5px;background:rgba(255,255,255,.12);border-radius:4px;padding:1px 5px;user-select:all}
+#selftest{position:fixed;right:12px;bottom:12px;z-index:30;background:#fff;border:2px solid var(--ink);border-radius:10px;padding:10px 14px;font:13px/1.5 var(--mono);white-space:pre;max-height:60vh;overflow:auto}
+
+@media (max-width:900px){
+  .list{display:none}
+  #lesson{flex-direction:column}
+  .panel{width:auto;flex:0 0 auto;border-left:0;border-top:1px solid var(--line)}
+}
+</style>
+<script src="editor-core.js"></script>
+</head>
+<body>
+<header class="bar">
+  <span class="brand"><svg width="22" height="25" viewBox="0 0 28 32" fill="none" aria-hidden="true"><path d="M3 2h15l7 7v16a2 2 0 0 1-2 2H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke-width="2.2" stroke-linejoin="round"/><path d="M18 2v7h7" stroke-width="2.2" stroke-linejoin="round"/><path d="M13 13v9m-3.5-3.5L13 22l3.5-3.5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Cut editor</span>
+  <span class="book" id="book"></span>
+  <span class="stats" id="stats"></span>
+  <span class="spacer"></span>
+  <div class="tabs" id="tabs" hidden><button type="button" data-view="overview" aria-pressed="true">Whole book</button><button type="button" data-view="lesson" aria-pressed="false">One lesson</button></div>
+  <button type="button" class="btn" id="undo" disabled hidden title="Undo (Ctrl+Z)">Undo</button>
+  <button type="button" class="btn" id="redo" disabled hidden title="Redo (Ctrl+Shift+Z)">Redo</button>
+  <label class="free" id="free-wrap" hidden>Free lessons <input type="number" id="free" min="1" max="99"></label>
+  <button type="button" class="btn btn-primary" id="save" disabled hidden title="Save (Ctrl+S)">Save lessons.json</button>
+</header>
+<div class="banner" id="draft" hidden></div>
+<main>
+  <section id="start">
+    <div class="drop" id="drop">
+      <h1>Adjust where each lesson starts and ends</h1>
+      <p>Open a book's PDF and the <code>lessons.json</code> the converter made for it. Drop both here, or choose them below. Nothing is uploaded; everything stays on this computer.</p>
+      <div class="pick">
+        <label id="pick-pdf"><strong>Book PDF</strong><span>Choose a file…</span><input type="file" accept="application/pdf,.pdf" id="in-pdf"></label>
+        <label id="pick-plan"><strong>lessons.json</strong><span>Choose a file…</span><input type="file" accept="application/json,.json" id="in-plan"></label>
+      </div>
+      <p>No <code>lessons.json</code> yet? Make one with <code>uv run converter/extract_pymupdf.py book.pdf</code>. It is in <code>converter/output/&lt;book&gt;-pymupdf/</code>.</p>
+      <p class="error" id="start-error" hidden></p>
+    </div>
+  </section>
+  <section id="overview" hidden>
+    <aside class="list" id="list"></aside>
+    <div class="grid" id="grid"></div>
+  </section>
+  <section id="lesson" hidden>
+    <div class="pages" id="pages"></div>
+    <aside class="panel" id="panel"></aside>
+  </section>
+</main>
+<div class="toast" id="toast" hidden></div>
+
+<script type="module">
+const C = window.DripbookCuts;
+const PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/";
+const $ = (sel, root = document) => root.querySelector(sel);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+const dpr = () => Math.min(window.devicePixelRatio || 1, 2);
+
+const S = {
+  plan: null, blocks: [], segs: [], undo: [], redo: [], view: "overview", k: 0,
+  pdf: null, pdfName: "", sizes: new Map(), pages: [], sync: true, saved: true, key: "",
+};
+window.dripbookEditor = S;   // for poking at it from the browser console
+
+// ------------------------------------------------------------------ PDF.js
+
+let pdfjsPromise = null;
+function pdfjs() {
+  // The worker runs from a blob so the editor also works when opened straight from disk.
+  pdfjsPromise ??= (async () => {
+    const lib = await import(PDFJS + "pdf.min.mjs");
+    try {
+      const code = await (await fetch(PDFJS + "pdf.worker.min.mjs")).text();
+      const url = URL.createObjectURL(new Blob([code], {type: "text/javascript"}));
+      lib.GlobalWorkerOptions.workerPort = new Worker(url, {type: "module"});
+    } catch {
+      lib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.mjs";
+    }
+    return lib;
+  })();
+  return pdfjsPromise;
+}
+
+async function drawPage(canvas, pageNo, cssWidth) {
+  const page = await S.pdf.getPage(pageNo);
+  const base = page.getViewport({scale: 1});
+  const viewport = page.getViewport({scale: (cssWidth / base.width) * dpr()});
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  await page.render({canvasContext: canvas.getContext("2d"), viewport}).promise;
+}
+
+let thumbQueue = Promise.resolve();
+function queueThumb(canvas, pageNo, cssWidth) {
+  thumbQueue = thumbQueue.then(() => drawPage(canvas, pageNo, cssWidth)).catch((e) => console.error(e));
+}
+
+const pageImages = new Map();   // page -> canvas at 2x, for cropping figures in the reader preview
+async function pageImage(pageNo) {
+  if (!pageImages.has(pageNo)) {
+    const canvas = document.createElement("canvas");
+    pageImages.set(pageNo, drawPage(canvas, pageNo, S.sizes.get(pageNo).w).then(() => canvas));
+    if (pageImages.size > 8) pageImages.delete(pageImages.keys().next().value);
+  }
+  return pageImages.get(pageNo);
+}
+
+// ------------------------------------------------------------------ loading
+
+const picked = {pdf: null, plan: null};
+
+function pick(file) {
+  if (!file) return;
+  if (/\.pdf$/i.test(file.name) || file.type === "application/pdf") picked.pdf = file;
+  else if (/\.json$/i.test(file.name) || file.type === "application/json") picked.plan = file;
+  $("#pick-pdf").classList.toggle("ok", !!picked.pdf);
+  $("#pick-plan").classList.toggle("ok", !!picked.plan);
+  if (picked.pdf) $("#pick-pdf span").textContent = picked.pdf.name;
+  if (picked.plan) $("#pick-plan span").textContent = picked.plan.name;
+  if (picked.pdf && picked.plan) {
+    Promise.all([picked.pdf.arrayBuffer(), picked.plan.text()])
+      .then(([data, text]) => open(new Uint8Array(data), picked.pdf.name, text))
+      .catch(startError);
+  }
+}
+
+function startError(e) {
+  console.error(e);
+  const el = $("#start-error");
+  el.textContent = e.message || String(e);
+  el.hidden = false;
+}
+
+async function sha256(data) {
+  try {
+    const hash = await crypto.subtle.digest("SHA-256", data);
+    return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return "";
+  }
+}
+
+async function open(data, pdfName, planText) {
+  const plan = JSON.parse(planText);
+  const {blocks, segs} = C.fromPlan(plan);
+  const hash = await sha256(data);
+  const lib = await pdfjs();
+  S.pdf = await lib.getDocument({data}).promise;
+  S.plan = plan;
+  S.plan.settings ??= {};
+  S.blocks = blocks;
+  S.segs = segs;
+  S.pdfName = pdfName;
+  S.undo = [];
+  S.redo = [];
+  S.sync = JSON.stringify(C.syncTeasers(segs).map((s) => s.teaser)) === JSON.stringify(segs.map((s) => s.teaser));
+  const range = plan.source?.pages?.length === 2 ? plan.source.pages : [1, S.pdf.numPages];
+  const first = Math.max(1, Math.min(range[0], blocks[0].page)), last = Math.min(S.pdf.numPages, Math.max(range[1], C.endPage(blocks, segs.at(-1))));
+  S.pages = [];
+  for (let p = first; p <= last; p++) S.pages.push(p);
+  await Promise.all(S.pages.map(async (p) => {
+    const vp = (await S.pdf.getPage(p)).getViewport({scale: 1});
+    S.sizes.set(p, {w: vp.width, h: vp.height});
+  }));
+  S.key = "dripbook-cuts:" + (plan.source?.sha256 || hash || pdfName);
+  const warning = plan.source?.sha256 && hash && plan.source.sha256 !== hash
+    ? "This lessons.json was made from a different PDF file. Check that the cuts line up with the pages." : "";
+  $("#start").hidden = true;
+  for (const id of ["#tabs", "#free-wrap", "#undo", "#redo", "#save"]) $(id).hidden = false;
+  $("#free").value = S.plan.settings.free_lessons || 3;
+  buildOverview();
+  setView("overview");
+  if (warning) toast(warning, 8000);
+  offerDraft();
+}
+
+// ------------------------------------------------------------------ editing
+
+function apply(next, message) {
+  if (!next) {
+    toast(message || "That cut would leave a lesson empty.");
+    return false;
+  }
+  S.undo.push(S.segs);
+  if (S.undo.length > 200) S.undo.shift();
+  S.redo = [];
+  S.segs = S.sync ? C.syncTeasers(next) : next;
+  changed();
+  return true;
+}
+
+function changed() {
+  S.saved = false;
+  S.k = Math.min(S.k, S.segs.length - 1);
+  saveDraft();
+  refresh();
+}
+
+function undo() {
+  if (!S.undo.length) return;
+  S.redo.push(S.segs);
+  S.segs = S.undo.pop();
+  changed();
+}
+
+function redo() {
+  if (!S.redo.length) return;
+  S.undo.push(S.segs);
+  S.segs = S.redo.pop();
+  changed();
+}
+
+function saveDraft() {
+  try {
+    localStorage.setItem(S.key, JSON.stringify({segs: S.segs, time: Date.now(), free: S.plan.settings.free_lessons}));
+  } catch {}
+}
+
+function offerDraft() {
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem(S.key) || "null"); } catch {}
+  if (!draft || !Array.isArray(draft.segs) || JSON.stringify(draft.segs) === JSON.stringify(S.segs)) return;
+  const valid = draft.segs.every((s, i) => s.a === (i ? draft.segs[i - 1].b + 1 : 0)) && draft.segs.at(-1).b === S.blocks.length - 1;
+  if (!valid) return;
+  const el = $("#draft");
+  el.innerHTML = `<span>You have unsaved edits to this book from ${esc(new Date(draft.time).toLocaleString())}.</span>
+    <button type="button" class="btn btn-small" data-act="restore">Restore them</button>
+    <button type="button" class="btn btn-small" data-act="discard">Start from the file</button>`;
+  el.hidden = false;
+  el.onclick = (e) => {
+    const act = e.target.dataset.act;
+    if (!act) return;
+    if (act === "restore") {
+      S.undo.push(S.segs);
+      S.segs = draft.segs;
+      if (draft.free) { S.plan.settings.free_lessons = draft.free; $("#free").value = draft.free; }
+      changed();
+    } else {
+      try { localStorage.removeItem(S.key); } catch {}
+    }
+    el.hidden = true;
+  };
+}
+
+function save() {
+  const plan = C.toPlan(S.plan, S.blocks, S.segs);
+  const blob = new Blob([JSON.stringify(plan, null, 2) + "\n"], {type: "application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "lessons.json";
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  S.saved = true;
+  refreshBar();
+  const engine = S.plan.source?.engine || "pymupdf";
+  const pages = S.plan.source?.pages ? ` --pages ${S.plan.source.pages[0]}-${S.plan.source.pages[1]}` : "";
+  toast(`Saved lessons.json. Render the pages from it with<br><code>uv run converter/extract_${esc(engine)}.py ${esc(S.pdfName)}${pages} --plan lessons.json</code>`, 12000);
+}
+
+// ------------------------------------------------------------------ views
+
+function setView(view, k) {
+  if (k !== undefined) S.k = k;
+  S.view = view;
+  $("#overview").hidden = view !== "overview";
+  $("#lesson").hidden = view !== "lesson";
+  document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
+  refresh(true);
+}
+
+function refresh(scroll) {
+  refreshBar();
+  if (S.view === "overview") {
+    renderList($("#list"));
+    paintOverview();
+    if (scroll) $("#list .row.active")?.scrollIntoView({block: "nearest"});
+  } else {
+    renderLesson(scroll);
+  }
+}
+
+function refreshBar() {
+  const st = C.stats(S.blocks, S.segs);
+  const title = S.plan.book?.title || S.pdfName;
+  $("#book").textContent = title;
+  $("#book").title = title;
+  $("#stats").textContent = `${st.lessons} lessons · ${st.shortest}–${st.longest} min, median ${st.median}` +
+    (st.flagged ? ` · ${st.flagged} to check` : "");
+  $("#undo").disabled = !S.undo.length;
+  $("#redo").disabled = !S.redo.length;
+  $("#save").disabled = false;
+  $("#save").textContent = S.saved ? "Save lessons.json" : "Save lessons.json •";
+}
+
+function pagesOf(seg) {
+  return [S.blocks[seg.a].page, C.endPage(S.blocks, seg)];
+}
+
+function renderList(el) {
+  const days = C.days(S.segs);
+  const free = S.plan.settings.free_lessons || 3;
+  el.innerHTML = S.segs.map((s, k) => {
+    const [p1, p2] = pagesOf(s);
+    const pages = p1 === p2 ? `p. ${p1}` : `pp. ${p1}–${p2}`;
+    if (s.kind === "skip") {
+      return `<div class="row skip${k === S.k ? " active" : ""}" data-k="${k}"><span class="day">Skip</span>
+        <span class="row-main"><span class="subj">${esc(s.reason || "Skipped")}</span><span class="meta">${pages} · ${C.words(S.blocks, s).toLocaleString()} words</span></span></div>`;
+    }
+    const w = C.warnings(S.blocks, s);
+    return `<div class="row${k === S.k ? " active" : ""}" data-k="${k}"><span class="day">Day ${days[k]}</span>
+      <span class="row-main"><span class="subj">${esc(s.subject)}${days[k] <= free ? '<span class="badge">free</span>' : ""}</span>
+      <span class="meta">${C.minutes(S.blocks, s)} min · ${pages}${w.length ? ` · <span class="flag">${esc(w[0])}</span>` : ""}</span></span></div>`;
+  }).join("");
+  el.onclick = (e) => {
+    const row = e.target.closest(".row");
+    if (row) setView("lesson", Number(row.dataset.k));
+  };
+}
+
+// The whole book: page thumbnails, a band per lesson, a line at each cut.
+let observer = null;
+function buildOverview() {
+  const grid = $("#grid");
+  grid.innerHTML = S.pages.map((p) => {
+    const {w, h} = S.sizes.get(p);
+    return `<div class="card"><div class="sheet" data-page="${p}" style="aspect-ratio:${w}/${h}"><canvas></canvas><div class="ov"></div></div><span class="pno">${p}</span></div>`;
+  }).join("");
+  observer?.disconnect();
+  observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const sheet = entry.target;
+      observer.unobserve(sheet);
+      queueThumb(sheet.querySelector("canvas"), Number(sheet.dataset.page), sheet.clientWidth || 170);
+    }
+  }, {root: grid, rootMargin: "600px"});
+  grid.querySelectorAll(".sheet").forEach((s) => observer.observe(s));
+  grid.onclick = (e) => {
+    const target = e.target.closest("[data-k]");
+    if (target) setView("lesson", Number(target.dataset.k));
+  };
+}
+
+function overlayHTML(page, opts = {}) {
+  const {h} = S.sizes.get(page);
+  const days = C.days(S.segs);
+  const pct = (y) => `${((y / h) * 100).toFixed(3)}%`;
+  let html = "";
+  for (const r of C.regionsOnPage(S.blocks, S.segs, page, h)) {
+    const s = S.segs[r.k];
+    const cls = s.kind === "skip" ? "skip" : (days[r.k] % 2 ? "a" : "b");
+    const dim = opts.focus !== undefined && r.k !== opts.focus ? " dim" : "";
+    const hot = opts.focus === undefined && r.k === S.k ? " hot" : "";
+    html += `<div class="band ${cls}${dim}${hot}" data-k="${r.k}" style="top:${pct(r.top)};height:${pct(r.bottom - r.top)}" title="${esc(s.kind === "skip" ? "Skipped: " + s.reason : `Day ${days[r.k]}: ${s.subject}`)}"></div>`;
+  }
+  if (!opts.noCuts) {
+    S.segs.forEach((s, k) => {
+      if (k === 0 || S.blocks[s.a].page !== page) return;
+      const y = C.boundaryPos(S.blocks, s.a).y;
+      const label = s.kind === "skip" ? "Skip" : `Day ${days[k]}`;
+      html += `<div class="cut" style="top:${pct(y)}"></div><span class="chip${s.kind === "skip" ? " skip" : ""}" data-k="${k}" style="top:${pct(y)}">${label}</span>`;
+    });
+  }
+  return html;
+}
+
+function paintOverview() {
+  document.querySelectorAll("#grid .sheet").forEach((sheet) => {
+    sheet.querySelector(".ov").innerHTML = overlayHTML(Number(sheet.dataset.page));
+  });
+}
+
+// One lesson: its pages large, its two cuts draggable, the email beside it.
+let shownPages = "";
+function renderLesson(scroll) {
+  const seg = S.segs[S.k];
+  const [p1, p2] = pagesOf(seg);
+  const first = Math.max(S.pages[0], p1 - 1), last = Math.min(S.pages.at(-1), p2 + 1);
+  const wanted = `${first}-${last}`;
+  const pagesEl = $("#pages");
+  if (wanted !== shownPages) {
+    shownPages = wanted;
+    pagesEl.innerHTML = "";
+    for (let p = first; p <= last; p++) {
+      const {w, h} = S.sizes.get(p);
+      const wrap = document.createElement("div");
+      wrap.className = "pg";
+      wrap.innerHTML = `<p class="pg-label">Page ${p}</p><div class="sheet" data-page="${p}" style="aspect-ratio:${w}/${h}"><canvas></canvas><div class="ov"></div></div>`;
+      pagesEl.append(wrap);
+      const sheet = wrap.querySelector(".sheet");
+      requestAnimationFrame(() => drawPage(sheet.querySelector("canvas"), p, sheet.clientWidth || 700).catch(console.error));
+    }
+    scroll = true;
+  }
+  paintLessonPages();
+  renderPanel();
+  if (scroll) {
+    const start = C.boundaryPos(S.blocks, Math.max(seg.a, 1));
+    const sheet = pagesEl.querySelector(`.sheet[data-page="${seg.a === 0 ? p1 : start.page}"]`);
+    if (sheet) {
+      const y = seg.a === 0 ? 0 : (start.y / S.sizes.get(start.page).h) * sheet.clientHeight;
+      pagesEl.scrollTop += sheet.getBoundingClientRect().top - pagesEl.getBoundingClientRect().top + y - 90;
+    }
+  }
+}
+
+function paintLessonPages() {
+  const seg = S.segs[S.k];
+  const days = C.days(S.segs);
+  const cutNo = (k) => k;   // cut k sits just before segment k
+  const name = seg.kind === "skip" ? "this skipped part" : `Day ${days[S.k]}`;
+  document.querySelectorAll("#pages .sheet").forEach((sheet) => {
+    const page = Number(sheet.dataset.page);
+    const {h} = S.sizes.get(page);
+    const pct = (y) => `${((y / h) * 100).toFixed(3)}%`;
+    let html = overlayHTML(page, {focus: S.k, noCuts: true});
+    // the cuts at either end, draggable
+    if (S.k > 0) {
+      const at = C.boundaryPos(S.blocks, seg.a);
+      if (at.page === page) html += `<div class="handle" data-end="start" style="top:${pct(at.y)}"><span>Cut ${cutNo(S.k)} · start of ${name}</span></div>`;
+    }
+    if (S.k < S.segs.length - 1) {
+      const at = C.boundaryPos(S.blocks, seg.b + 1);
+      if (at.page === page) html += `<div class="handle" data-end="end" style="top:${pct(at.y)}"><span>Cut ${cutNo(S.k + 1)} · end of ${name}</span></div>`;
+    }
+    sheet.querySelector(".ov").innerHTML = html;
+  });
+}
+
+function blockSnippet(j) {
+  const b = S.blocks[j];
+  const text = b.type === "figure" ? (b.caption || "Figure") : (b.text || "");
+  return text.split(/\s+/).slice(0, 9).join(" ");
+}
+
+// Dragging a cut: it snaps to the nearest gap between blocks that keeps both lessons non-empty.
+function startDrag(handle, ev) {
+  const which = handle.dataset.end;
+  const k = which === "start" ? S.k : S.k + 1;   // the segment whose start moves
+  const lo = S.segs[k - 1].a + 1, hi = S.segs[k].b;
+  handle.classList.add("dragging");
+  handle.setPointerCapture(ev.pointerId);
+  const pagesEl = $("#pages");
+  let ghost = null, choice = null, last = ev, timer = null;
+  const autoscroll = () => {   // near the top or bottom edge, keep scrolling so a cut can travel far
+    const box = pagesEl.getBoundingClientRect();
+    const speed = last.clientY < box.top + 60 ? -14 : last.clientY > box.bottom - 60 ? 14 : 0;
+    if (!speed) { timer = null; return; }
+    pagesEl.scrollTop += speed;
+    track(last);
+    timer = requestAnimationFrame(autoscroll);
+  };
+  const move = (e) => {
+    last = {clientX: e.clientX, clientY: e.clientY};
+    track(last);
+    if (!timer) timer = requestAnimationFrame(autoscroll);
+  };
+  const track = (e) => {
+    const sheet = document.elementsFromPoint(e.clientX, e.clientY).map((el) => el.closest?.("#pages .sheet")).find(Boolean);
+    if (!sheet) return;
+    const page = Number(sheet.dataset.page);
+    const rect = sheet.getBoundingClientRect();
+    const y = ((e.clientY - rect.top) / rect.height) * S.sizes.get(page).h;
+    let best = null;
+    for (const c of C.boundariesOnPage(S.blocks, page)) {
+      if (c.j < lo || c.j > hi) continue;
+      if (!best || Math.abs(c.y - y) < Math.abs(best.y - y)) best = c;
+    }
+    if (!best) return;
+    choice = best.j;
+    ghost?.remove();
+    ghost = document.createElement("div");
+    ghost.className = "ghost";
+    ghost.style.top = `${(best.y / S.sizes.get(page).h) * 100}%`;
+    ghost.innerHTML = `<span>Starts: ${esc(blockSnippet(best.j))}…</span>`;
+    sheet.querySelector(".ov").append(ghost);
+  };
+  const up = () => {
+    if (timer) cancelAnimationFrame(timer);
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", up);
+    handle.removeEventListener("pointercancel", up);
+    ghost?.remove();
+    handle.classList.remove("dragging");
+    if (choice !== null && choice !== S.segs[k].a) apply(C.moveCut(S.segs, k, choice, S.blocks));
+  };
+  handle.addEventListener("pointermove", move);
+  handle.addEventListener("pointerup", up);
+  handle.addEventListener("pointercancel", up);
+}
+
+$("#pages").addEventListener("pointerdown", (e) => {
+  const handle = e.target.closest(".handle");
+  if (handle) {
+    e.preventDefault();
+    startDrag(handle, e);
+  }
+});
+// Pointing inside the lesson shows a "Cut here" line at the nearest gap between blocks.
+let hoverCut = null;
+function showHoverCut(e) {
+  if (e.target.closest(".handle, .hover-cut button") || document.querySelector("#pages .handle.dragging")) return;
+  const sheet = e.target.closest("#pages .sheet");
+  const seg = S.segs[S.k];
+  if (!sheet) { hoverCut?.remove(); hoverCut = null; return; }
+  const page = Number(sheet.dataset.page);
+  const rect = sheet.getBoundingClientRect();
+  const {h} = S.sizes.get(page);
+  const y = ((e.clientY - rect.top) / rect.height) * h;
+  let best = null;
+  for (const c of C.boundariesOnPage(S.blocks, page)) {
+    if (c.j > seg.a && c.j <= seg.b && (!best || Math.abs(c.y - y) < Math.abs(best.y - y))) best = c;
+  }
+  if (!best || Math.abs(best.y - y) > 40) { hoverCut?.remove(); hoverCut = null; return; }
+  if (hoverCut?.dataset.j === String(best.j) && sheet.contains(hoverCut)) return;
+  hoverCut?.remove();
+  hoverCut = document.createElement("div");
+  hoverCut.className = "hover-cut";
+  hoverCut.dataset.j = best.j;
+  hoverCut.style.top = `${(best.y / h) * 100}%`;
+  hoverCut.innerHTML = `<button type="button">Cut here</button>`;
+  sheet.querySelector(".ov").append(hoverCut);
+}
+$("#pages").addEventListener("pointermove", showHoverCut);
+$("#pages").addEventListener("pointerleave", () => { hoverCut?.remove(); hoverCut = null; });
+$("#pages").addEventListener("click", (e) => {
+  const button = e.target.closest(".hover-cut button");
+  if (!button) return;
+  const j = Number(button.parentElement.dataset.j);
+  hoverCut = null;
+  apply(C.split(S.segs, S.k, j, S.blocks));
+});
+
+function renderPanel() {
+  const seg = S.segs[S.k];
+  const days = C.days(S.segs);
+  const lessons = days.filter(Boolean).length;
+  const [p1, p2] = pagesOf(seg);
+  const w = C.warnings(S.blocks, seg);
+  const skip = seg.kind === "skip";
+  const panel = $("#panel");
+  const active = document.activeElement;
+  const typing = active && panel.contains(active) && active.matches("input[type=text]") ? active.dataset.field : null;
+  panel.innerHTML = `
+    <div class="nav">
+      <button type="button" class="btn btn-small" data-act="prev" ${S.k === 0 ? "disabled" : ""} title="Previous (←)">←</button>
+      <h2>${skip ? "Skipped part" : `Day ${days[S.k]} <span class="stats">of ${lessons}</span>`}</h2>
+      <button type="button" class="btn btn-small" data-act="next" ${S.k === S.segs.length - 1 ? "disabled" : ""} title="Next (→)">→</button>
+    </div>
+    ${skip ? `<div class="field"><label for="f-reason">Why it's skipped</label><input type="text" id="f-reason" data-field="reason" value="${esc(seg.reason)}"></div>` : `
+    <div class="field"><label for="f-subject">Subject line</label><input type="text" id="f-subject" data-field="subject" maxlength="90" value="${esc(seg.subject)}"></div>
+    <div class="field"><label for="f-lead">Intro line <span>optional</span></label><input type="text" id="f-lead" data-field="lead_in" maxlength="220" value="${esc(seg.lead_in)}"></div>
+    <div class="field"><label for="f-teaser">Tomorrow line <span class="sync"><input type="checkbox" id="f-sync" ${S.sync ? "checked" : ""}> same as next subject</span></label>
+      <input type="text" id="f-teaser" data-field="teaser" maxlength="220" value="${esc(seg.teaser)}" ${S.sync ? "disabled" : ""}></div>`}
+    <p class="facts">${C.words(S.blocks, seg).toLocaleString()} words${skip ? "" : `, about ${C.minutes(S.blocks, seg)} minutes`} · ${p2 !== p1 ? `pages ${p1}–${p2}` : `page ${p1}`} · blocks ${esc(S.blocks[seg.a].id)} to ${esc(S.blocks[seg.b].id)}</p>
+    ${w.length ? `<p class="warn">${w.map(esc).join("<br>")}</p>` : ""}
+    <div class="actions">
+      <button type="button" class="btn btn-small" data-act="merge-prev" ${S.k === 0 ? "disabled" : ""}>Merge with previous</button>
+      <button type="button" class="btn btn-small" data-act="merge-next" ${S.k === S.segs.length - 1 ? "disabled" : ""}>Merge with next</button>
+      ${skip ? `<button type="button" class="btn btn-small" data-act="lesson">Make it a lesson</button>` : `<button type="button" class="btn btn-small" data-act="skip">Skip these pages</button>`}
+    </div>
+    <p class="help">Drag a black line to move that cut; it snaps to the gaps between paragraphs. To cut this ${skip ? "part" : "lesson"} in two, point at the page and click <strong>Cut here</strong> on the blue line.</p>
+    <div class="reader"><h3 class="rt">${skip ? "Text in this part" : "What readers get"}</h3><div class="email" id="email"></div></div>`;
+  renderEmail($("#email"), seg, skip);
+  if (typing) {
+    const el = panel.querySelector(`[data-field="${typing}"]`);
+    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  }
+}
+
+$("#panel").addEventListener("click", (e) => {
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  if (!act) return;
+  if (act === "prev") step(-1);
+  if (act === "next") step(1);
+  if (act === "merge-prev" && apply(C.merge(S.segs, S.k - 1))) { S.k -= 1; refresh(true); }
+  if (act === "merge-next") apply(C.merge(S.segs, S.k));
+  if (act === "skip") apply(C.setKind(S.segs, S.k, "skip", S.blocks));
+  if (act === "lesson") apply(C.setKind(S.segs, S.k, "lesson", S.blocks));
+});
+
+let editSnapshot = null;
+$("#panel").addEventListener("focusin", (e) => {
+  if (e.target.dataset.field) editSnapshot = S.segs;
+});
+$("#panel").addEventListener("input", (e) => {
+  const field = e.target.dataset.field;
+  if (!field) return;
+  let next = C.setText(S.segs, S.k, field, e.target.value);
+  if (S.sync && field === "subject") next = C.syncTeasers(next);
+  S.segs = next;
+  S.saved = false;
+  refreshBar();
+  renderEmail($("#email"), S.segs[S.k], S.segs[S.k].kind === "skip");
+});
+$("#panel").addEventListener("change", (e) => {
+  if (e.target.id === "f-sync") {
+    S.sync = e.target.checked;
+    if (S.sync) apply(C.syncTeasers(S.segs)); else renderPanel();
+    return;
+  }
+  if (e.target.dataset.field && editSnapshot && editSnapshot !== S.segs) {
+    S.undo.push(editSnapshot);
+    S.redo = [];
+    editSnapshot = null;
+    saveDraft();
+    refreshBar();
+  }
+});
+
+function step(d) {
+  const k = S.k + d;
+  if (k >= 0 && k < S.segs.length) { S.k = k; refresh(true); }
+}
+
+// A plain rendering of the lesson as it reads, figures cropped from the PDF.
+function runsHTML(b) {
+  const runs = b.runs || [[b.text || "", ""]];
+  return runs.map(([t, style]) => {
+    let h = esc(t);
+    if (style === "code") return `<code>${h}</code>`;
+    if (style === "sup" || style === "sub") return `<${style}>${h}</${style}>`;
+    if (style.includes("b")) h = `<strong>${h}</strong>`;
+    if (style.includes("i")) h = `<em>${h}</em>`;
+    return h;
+  }).join("");
+}
+
+function renderEmail(el, seg, skip) {
+  let html = skip ? "" : `<div class="subject">${esc(seg.subject)}</div>${seg.lead_in ? `<p class="lead">${esc(seg.lead_in)}</p>` : ""}`;
+  const figures = [];
+  for (let i = seg.a; i <= seg.b; i++) {
+    const b = S.blocks[i];
+    if (b.type === "heading") html += `<h4>${esc(b.text).replace(/\n/g, "<br>")}</h4>`;
+    else if (b.type === "code") html += `<pre>${esc(b.text)}</pre>`;
+    else if (b.type === "list_item") html += `<div class="li" style="margin-left:${((b.level || 1) - 1) * 18}px"><span class="m">${esc(b.marker)}</span><span>${runsHTML(b)}</span></div>`;
+    else if (b.type === "figure") { html += `<figure data-i="${i}"><canvas></canvas>${b.caption ? `<figcaption>${esc(b.caption)}</figcaption>` : ""}</figure>`; figures.push(i); }
+    else if (b.type === "footnote") html += `<p class="fn">${runsHTML(b)}</p>`;
+    else html += `<p${b.quote ? ' class="quote"' : ""}>${runsHTML(b)}</p>`;
+  }
+  if (!skip && seg.teaser) html += `<p class="tomorrow"><strong>Tomorrow:</strong> ${esc(seg.teaser)}</p>`;
+  el.innerHTML = html;
+  for (const i of figures) {
+    const b = S.blocks[i];
+    if (!b.box) continue;
+    pageImage(b.page).then((page) => {
+      const canvas = el.querySelector(`figure[data-i="${i}"] canvas`);
+      if (!canvas) return;
+      const scale = page.width / S.sizes.get(b.page).w;
+      const [x0, y0, x1, y1] = b.box.map((v) => v * scale);
+      canvas.width = Math.max(1, Math.round(x1 - x0));
+      canvas.height = Math.max(1, Math.round(y1 - y0));
+      canvas.style.width = `${Math.round((x1 - x0) / scale * 1.1)}px`;
+      canvas.getContext("2d").drawImage(page, x0, y0, x1 - x0, y1 - y0, 0, 0, canvas.width, canvas.height);
+    }).catch(console.error);
+  }
+}
+
+// ------------------------------------------------------------------ chrome
+
+let toastTimer = null;
+function toast(html, ms = 3500) {
+  const el = $("#toast");
+  el.innerHTML = html;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+}
+
+$("#tabs").addEventListener("click", (e) => {
+  const view = e.target.closest("button")?.dataset.view;
+  if (view) setView(view);
+});
+$("#undo").onclick = undo;
+$("#redo").onclick = redo;
+$("#save").onclick = save;
+$("#free").addEventListener("change", (e) => {
+  const n = Math.max(1, Math.round(Number(e.target.value) || 1));
+  e.target.value = n;
+  S.plan.settings.free_lessons = n;
+  S.saved = false;
+  saveDraft();
+  refresh();
+});
+document.addEventListener("keydown", (e) => {
+  if (!S.plan) return;
+  const typing = e.target.matches?.("input, textarea");
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === "z" && !typing) { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if (mod && e.key.toLowerCase() === "y" && !typing) { e.preventDefault(); redo(); }
+  else if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); save(); }
+  else if (!typing && S.view === "lesson" && e.key === "ArrowLeft") step(-1);
+  else if (!typing && S.view === "lesson" && e.key === "ArrowRight") step(1);
+  else if (!typing && e.key === "Escape") setView("overview");
+});
+window.addEventListener("beforeunload", (e) => {
+  if (S.plan && !S.saved) { e.preventDefault(); e.returnValue = ""; }
+});
+
+$("#in-pdf").addEventListener("change", (e) => pick(e.target.files[0]));
+$("#in-plan").addEventListener("change", (e) => pick(e.target.files[0]));
+const drop = $("#drop");
+for (const type of ["dragenter", "dragover"]) drop.addEventListener(type, (e) => { e.preventDefault(); drop.classList.add("over"); });
+for (const type of ["dragleave", "drop"]) drop.addEventListener(type, () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault();
+  [...e.dataTransfer.files].forEach(pick);
+});
+
+// ?pdf=…&plan=… loads files by URL when this page is served over http (also used for testing).
+const params = new URLSearchParams(location.search);
+if (params.get("pdf") && params.get("plan")) {
+  (async () => {
+    try {
+      const [pdf, plan] = await Promise.all([fetch(params.get("pdf")), fetch(params.get("plan"))]);
+      if (!pdf.ok || !plan.ok) throw new Error("Couldn't load the files named in the address.");
+      await open(new Uint8Array(await pdf.arrayBuffer()), params.get("pdf").split("/").pop(), await plan.text());
+      if (params.get("day")) {
+        const k = C.days(S.segs).indexOf(Number(params.get("day")));
+        if (k >= 0) setView("lesson", k);
+      }
+      if (params.get("selftest")) selfTest();
+    } catch (e) {
+      startError(e);
+    }
+  })();
+}
+
+// ?selftest=1 runs edits through the same functions the buttons use, and shows the result.
+function selfTest() {
+  const out = [];
+  const check = (name, ok) => out.push(`${ok ? "PASS" : "FAIL"} ${name}`);
+  const before = S.segs.length;
+  setView("lesson", 1);
+  const seg = S.segs[1];
+  const mid = Math.floor((seg.a + seg.b) / 2) + 1;
+  check("split adds a lesson", apply(C.split(S.segs, 1, mid, S.blocks)) && S.segs.length === before + 1);
+  check("new lesson starts at the cut", S.segs[2].a === mid);
+  check("teasers follow subjects", S.segs[1].teaser === S.segs[2].subject);
+  check("move cut", apply(C.moveCut(S.segs, 2, mid + 1, S.blocks)) && S.segs[2].a === mid + 1);
+  check("bad move refused", !apply(C.moveCut(S.segs, 2, S.segs[2].b + 1, S.blocks)));
+  undo(); undo();
+  check("undo twice restores", S.segs.length === before);
+  redo();
+  check("redo", S.segs.length === before + 1);
+  check("merge back", apply(C.merge(S.segs, 1)) && S.segs.length === before);
+  const plan = C.toPlan(S.plan, S.blocks, S.segs);
+  check("saved plan covers the book", plan.lessons.length + plan.skipped.length === S.segs.length && plan.all_blocks.length === S.blocks.length);
+  check("lesson view shows both cuts", document.querySelectorAll("#pages .handle").length >= 1);
+  const inside = S.pages.flatMap((p) => C.boundariesOnPage(S.blocks, p)).filter((c) => c.j > S.segs[1].a && c.j <= S.segs[1].b);
+  check("lesson has places to cut", inside.length > 0);
+  const box = document.createElement("div");
+  box.id = "selftest";
+  box.textContent = out.join("\n");
+  document.body.append(box);
+}
+</script>
+</body>
+</html>

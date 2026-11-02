@@ -8,6 +8,8 @@ import contextlib
 import importlib.util
 import io
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -699,6 +701,46 @@ class MainTests(unittest.TestCase):
         self.assertEqual(convert.parse_pages("7"), [7])
         with self.assertRaises(Exception):
             convert.parse_pages("a-b")
+
+
+def node_command():
+    """A way to run Node.js: node itself, or uv's nodejs-wheel package. None if neither works."""
+    if shutil.which("node"):
+        return ["node"]
+    if shutil.which("uvx"):
+        probe = subprocess.run(["uvx", "-q", "--from", "nodejs-wheel", "node", "--version"], capture_output=True)
+        if probe.returncode == 0:
+            return ["uvx", "-q", "--from", "nodejs-wheel", "node"]
+    return None
+
+
+class EditorCoreTests(unittest.TestCase):
+    """The cut editor's logic (editor-core.js) has its own tests in test_editor_core.mjs."""
+
+    def test_editor_core(self):
+        node = node_command()
+        if not node:
+            self.skipTest("needs Node.js, or uv to fetch it")
+        result = subprocess.run(node + ["--test", str(HERE / "test_editor_core.mjs")], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_plan_settings_choose_free_lessons(self):
+        raw = sample_book()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "book.pdf").write_bytes(b"%PDF")
+            ids = [b["id"] for b in convert.parse(raw)["blocks"]]
+            plan = {"settings": {"free_lessons": 2}, "lessons": [
+                {"first_block": ids[0], "last_block": ids[3], "subject": "One"},
+                {"first_block": ids[4], "last_block": ids[7], "subject": "Two"},
+                {"first_block": ids[8], "last_block": ids[-1], "subject": "Three"}]}
+            (tmp / "plan.json").write_text(json.dumps(plan))
+            with mock.patch.object(convert, "read_pdf", return_value=raw), contextlib.redirect_stdout(io.StringIO()):
+                convert.main([str(tmp / "book.pdf"), "--plan", str(tmp / "plan.json"), "--out", str(tmp / "o")])
+            course = json.loads((tmp / "o" / "lessons.json").read_text())
+            self.assertEqual(course["settings"]["free_lessons"], 2)
+            self.assertEqual(len(course["all_blocks"]), len(ids))
+            self.assertTrue(all("top" in b and "bottom" in b for b in course["all_blocks"]))
 
 
 THINK_PYTHON = HERE / "output" / "thinkpython2.pdf"

@@ -7,7 +7,7 @@ Turn your ebook into a paid email course.
 | `scripts/site_check.py` | Pre-launch check for `site/`: broken links and unfilled settings. |
 | `vercel.json` | Hosting config: serves `site/` on Vercel. |
 | `discovery/` | Customer discovery: finds ebook creators to pitch. Not part of the website. |
-| `converter/` | Turns an ebook PDF or its free sample into email lessons, for private previews. |
+| `converter/` | Turns an ebook PDF into daily lessons, plus `editor.html` for adjusting where they're cut. |
 
 ## Website
 
@@ -119,3 +119,14 @@ python3 -m unittest discover -s converter                  # offline tests
 `--claude` lets Claude choose the lesson boundaries and write subject lines instead. It sends the book's text to Anthropic's API, so it is never used unless you ask for it.
 
 Known limits: scanned PDFs (no OCR), two-column layouts, and math formulas, which come out as plain text.
+
+### Cut editor
+
+`converter/editor.html` is a page for adjusting where each lesson starts and ends, on top of the automatic split. Open it in a browser straight from disk (no server), then choose or drop the book's PDF and its `lessons.json`. Nothing is uploaded.
+
+- **Whole book:** every page as a thumbnail, with a coloured band per lesson, a line at each cut and the lesson list beside it. Skipped pages are hatched.
+- **One lesson:** its pages large, with its two cuts as black lines. Drag a line to move that cut; it snaps to the gaps between paragraphs, so text, code and figures are never split. Point at a page and click **Cut here** to split the lesson. You can also merge with the next or previous lesson, skip pages (like a title page), and edit the subject, intro and "Tomorrow" lines while seeing what readers get.
+- Undo and redo, read times and warnings update as you go. Unsaved edits survive a reload.
+- **Save lessons.json** downloads the edited plan. Render it with `uv run converter/extract_pymupdf.py book.pdf --plan lessons.json` (add the same `--pages` if you used it).
+
+The cut logic is in `editor-core.js`, with tests in `test_editor_core.mjs`, which run as part of `python3 -m unittest discover -s converter` when Node.js is available (uv can fetch it). The page loads PDF.js from jsDelivr, so it needs an internet connection.

@@ -436,14 +436,19 @@ def build_blocks(pages):
         footnotes = footnote_lines(page, body)
         events = [(l["base"], 1, l) for l in page["lines"] if not any(l is f for f in footnotes)]
         events += [(f["top"], 0, f) for f in page["figures"]]
-        prev = None
+        prev = placed = None
         for _, kind, item in sorted(events, key=lambda e: (e[0], e[1])):
+            if placed:   # every branch below leaves the line it handled in `last`
+                mark_position(last, page["number"], placed)
+                placed = None
             if kind == 0:
+                box = item["box"]
                 blocks.append({"type": "figure", "page": page["number"], "kind": item["kind"], "caption": item["caption"],
-                               "box": item["box"]})
+                               "box": box, "_start": (page["number"], box[1]), "_end": (page["number"], box[3])})
                 continue
             line = dict(item, rel=item["x0"] - left, long=item["x1"] >= right - 0.15 * (right - left),
                         full=item["x1"] >= right - 0.5 * body)
+            placed = line
             gap = line["base"] - prev["base"] if prev else None
             new_page = prev is None
             prev = line
@@ -498,9 +503,18 @@ def build_blocks(pages):
             if line["rel"] > 1.5 * body:
                 last["quote"] = True
             blocks.append(last)
+        if placed:
+            mark_position(last, page["number"], placed)
         for line in footnotes:
             blocks.append({"type": "footnote", "page": page["number"], "runs": [list(r) for r in line["runs"]]})
+            mark_position(blocks[-1], page["number"], line)
     return finish_blocks(blocks)
+
+
+def mark_position(block, page, line):
+    """Stretch a block's recorded extent to cover this line: where it starts, and where it ends."""
+    block.setdefault("_start", (page, line["base"] - 0.85 * line["size"]))
+    block["_end"] = (page, line["base"] + 0.3 * line["size"])
 
 
 def is_heading_size(line, body):
@@ -637,11 +651,15 @@ def finish_blocks(blocks):
     for b in out:
         if b["type"] == "heading":
             b["level"] = used.index(b["level"]) + 1
+        if "_start" in b:   # where the block sits, in points from the top of its pages
+            b["top"] = round(b["_start"][1], 1)
+            b["end_page"], b["bottom"] = b["_end"][0], round(b["_end"][1], 1)
         counts[b["page"]] += 1
         b["id"] = f"p{b['page']}.{counts[b['page']]}"
         for k in [k for k in b if k.startswith("_")]:
             del b[k]
-    order = ["id", "type", "page", "level", "marker", "kind", "quote", "text", "caption", "box", "runs"]
+    order = ["id", "type", "page", "top", "end_page", "bottom", "level", "marker", "kind", "quote", "text", "caption",
+             "box", "runs"]
     return [{k: b[k] for k in order if k in b} for b in out]
 
 
@@ -983,6 +1001,8 @@ def build_course(raw, doc, settings):
         "skipped": skipped,
         "warnings": doc["warnings"] + warnings,
         "lessons": lessons,
+        # Every block of the source, so the cut editor (editor.html) can move a cut anywhere.
+        "all_blocks": [dict(b, words=block_words(b)) for b in blocks],
     }
     return course, []
 
@@ -1728,8 +1748,8 @@ def main(argv=None):
     parser.add_argument("--plan", help="render this plan (a lessons.json) instead of splitting by headings")
     parser.add_argument("--target-words", type=int, default=900,
                         help="words per lesson when splitting by headings (default: 900, about 4 minutes)")
-    parser.add_argument("--free", type=int, default=3,
-                        help="free lessons; the last one ends with the call to action (default: 3)")
+    parser.add_argument("--free", type=int,
+                        help="free lessons; the last one ends with the call to action (default: the plan's, or 3)")
     parser.add_argument("--out", help="output folder (default: converter/output/<book-slug>, "
                                       "or <book-slug>-pymupdf with --engine pymupdf)")
     parser.add_argument("--title", help="book title, if the PDF doesn't say")
@@ -1747,7 +1767,7 @@ def main(argv=None):
     claude.add_argument("--chunk-words", type=int, default=12000, help="words per planning request (default: 12000)")
     claude.add_argument("--dry-run", action="store_true", help="print the planning prompts and exit")
     args = parser.parse_args(argv)
-    if args.free < 1:
+    if args.free is not None and args.free < 1:
         parser.error("--free must be at least 1")
 
     if args.dry_run and not args.claude:
@@ -1798,7 +1818,8 @@ def main(argv=None):
         if raw is None:  # --dry-run
             return 0
 
-    settings = {"free_lessons": min(args.free, len(raw.get("lessons") or [])) or args.free, "price": args.price,
+    free = args.free or (raw.get("settings") or {}).get("free_lessons") or 3   # the cut editor saves its choice
+    settings = {"free_lessons": min(free, len(raw.get("lessons") or [])) or free, "price": args.price,
                 "cta_url": args.cta_url, "image_base_url": args.image_base_url, "title": args.title, "author": args.author,
                 "fallback_title": pdf.stem, "source": source}
     course, errors = build_course(raw, doc, settings)
