@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Roadmap · Dripbook</title>
+<meta name="description" content="Where Dripbook is going: drips on any messaging app, lessons you can listen to, and a growing catalog of self-published books.">
+<meta name="theme-color" content="#141B33">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>
+.rm-hero{padding-block:56px 72px;gap:24px}
+.rm-hero h1{max-width:13ch}
+.track{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(5,1fr);gap:12px;counter-reset:step}
+.track li{counter-increment:step;display:flex;flex-direction:column;gap:10px;padding:20px;border-radius:16px;background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.14)}
+.track li::before{content:counter(step);width:32px;height:32px;border-radius:50%;background:var(--ribbon);color:var(--on-ribbon);font-weight:800;display:flex;align-items:center;justify-content:center}
+.track b{font-size:18px}
+.track span{font-size:15px;line-height:1.5;color:var(--band-muted)}
+@media (max-width:900px){.track{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){.track{grid-template-columns:1fr}}
+.bets{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:24px}
+.bet{display:flex;flex-direction:column;gap:16px;padding:32px;border:1.5px solid var(--rule);border-radius:20px;background:var(--surface)}
+.bet-n{font-size:15px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.bet h3{margin:0;font-size:26px;line-height:1.15;letter-spacing:-.02em}
+.bet p{margin:0;font-size:18px;line-height:1.55;color:var(--muted)}
+.bet .icon-row{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;min-height:34px;padding:0 14px;border-radius:999px;border:1.5px solid var(--line);font-size:15px;font-weight:600}
+.chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.bet .next{margin-top:auto;padding-top:16px;border-top:1px solid var(--line);font-size:16px;line-height:1.5;color:var(--ink)}
+.bet .next b{display:block;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.wave{display:flex;align-items:center;gap:4px;height:34px}
+.wave i{display:block;width:5px;border-radius:3px;background:var(--ribbon)}
+.loop{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:18px;font-weight:700}
+.loop span{padding:14px 20px;border-radius:14px;background:var(--surface);border:1.5px solid var(--rule)}
+.loop i{font-style:normal;color:var(--muted);font-size:22px}
+</style>
+</head>
+<body>
+
+<header class="wrap nav">
+  <a href="./" class="brand">
+    <svg width="30" height="32" viewBox="0 0 28 30" fill="none" aria-hidden="true" class="icon"><path d="M14 6.5C11.5 4.5 7.5 3.5 3 4v15c4.5-.5 8.5.5 11 2.5 2.5-2 6.5-3 11-2.5V4c-4.5-.5-8.5.5-11 2.5z" stroke-width="2.2" stroke-linejoin="round"/><path d="M14 6.5v15" stroke-width="2.2"/><path d="M14 21.5s-3 3.4-3 5.3a3 3 0 0 0 6 0c0-1.9-3-5.3-3-5.3z" fill="#F4B425" stroke="none"/></svg>
+    Dripbook
+  </a>
+  <nav aria-label="Main">
+    <a href="./#how">How it works</a>
+    <a href="./#start" class="btn">Upload PDF</a>
+  </nav>
+</header>
+
+<main>
+  <section class="wrap stack rm-hero">
+    <p class="eyebrow">Roadmap</p>
+    <h1>Where Dripbook is going.</h1>
+    <p class="lede">A book, a little at a time, wherever you already are. Here is what we are building first, and the three bets that come after it.</p>
+  </section>
+
+  <section class="statement">
+    <div class="wrap section stack" style="gap:36px">
+      <div class="stack" style="gap:14px">
+        <p class="eyebrow" style="color:var(--band-muted)">Now</p>
+        <h2 style="max-width:20ch">First, every step works end to end.</h2>
+        <p class="aside" style="margin:0;font-size:19px;line-height:1.55;color:var(--band-muted);max-width:36em">Before anything new, the whole path from a PDF to a paying reader has to run smoothly, without anyone holding it together by hand.</p>
+      </div>
+      <ol class="track">
+        <li><b>Upload</b><span>The author sends a PDF.</span></li>
+        <li><b>Preview</b><span>The author sees the lessons and approves them.</span></li>
+        <li><b>Sales page</b><span>One link to share with readers.</span></li>
+        <li><b>Daily lessons</b><span>Sent on schedule, paused or read ahead at will.</span></li>
+        <li><b>Payment</b><span>Readers unlock the rest; the author gets paid.</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="wrap section stack" style="gap:48px">
+    <div class="stack" style="gap:14px">
+      <p class="eyebrow">Next</p>
+      <h2 style="max-width:18ch">Three bets for growing.</h2>
+    </div>
+    <div class="bets">
+      <article class="bet">
+        <span class="bet-n">Bet 1</span>
+        <h3>Any inbox, not just email</h3>
+        <p>If it can receive a message, it can receive a lesson. Readers pick where the drip arrives when they sign up.</p>
+        <div class="icon-row" aria-label="Channels"><span class="chip on">Email</span><span class="chip">WhatsApp</span><span class="chip">Slack</span><span class="chip">Telegram</span><span class="chip">SMS</span></div>
+        <p class="next"><b>First step</b>Add one channel after email: the one readers ask for most.</p>
+      </article>
+      <article class="bet">
+        <span class="bet-n">Bet 2</span>
+        <h3>Listen as well as read</h3>
+        <p>Every lesson as a 5 to 10 minute audio clip, for the commute or a walk. It arrives in the reader's own podcast app.</p>
+        <div class="wave" aria-hidden="true"><i style="height:10px"></i><i style="height:22px"></i><i style="height:30px"></i><i style="height:16px"></i><i style="height:26px"></i><i style="height:34px"></i><i style="height:20px"></i><i style="height:12px"></i><i style="height:24px"></i><i style="height:30px"></i><i style="height:14px"></i><i style="height:8px"></i></div>
+        <p class="next"><b>First step</b>Voice one book as a pilot, with the author's go-ahead for audio.</p>
+      </article>
+      <article class="bet">
+        <span class="bet-n">Bet 3</span>
+        <h3>A catalog of self-published books</h3>
+        <p>Browse books by independent authors, read the author's own free sample, and buy straight from them, even before a book becomes a drip. Readers can ask for it as a drip, and authors can claim their book and upload it themselves.</p>
+        <p class="next"><b>First step</b>List the first 50 books and show each author how many readers want theirs.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="wrap section stack" style="gap:28px;padding-top:0">
+    <h2 style="max-width:20ch">Why the catalog matters most.</h2>
+    <div class="loop" aria-label="More books bring more readers; reader requests bring more authors; more authors bring more books.">
+      <span>More books</span><i aria-hidden="true">→</i><span>More readers</span><i aria-hidden="true">→</i><span>Readers ask for books</span><i aria-hidden="true">→</i><span>More authors join</span><i aria-hidden="true">↺</i>
+    </div>
+    <p class="body">Readers asking for a book are the best reason for its author to join. A listing only shows facts about the book and links to the author's own pages, and any author can have theirs taken down.</p>
+  </section>
+
+  <section class="wrap" style="padding-bottom:112px">
+    <div class="cta">
+      <div class="stack" style="gap:16px">
+        <h2>Have a book? Start with email today.</h2>
+        <p class="body">Everything on this page builds on the same course you can set up now.</p>
+      </div>
+      <div><a href="./#start" class="btn btn-ribbon btn-lg">Upload PDF</a></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand">Dripbook</span>
+    <div><a href="./">Home</a><a href="privacy.html">Privacy</a></div>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,5 +1,5 @@
 # dripbook
-Turn your ebook into a paid email course.
+Turn your ebook into a paid email course. Where it's heading: [ROADMAP.md](ROADMAP.md).
 
 | Path | What it is |
 |---|---|
