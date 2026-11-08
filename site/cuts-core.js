@@ -1,4 +1,4 @@
-// The cut editor's logic, with no page code: editor.html draws it, test_editor_core.mjs tests it.
+// The cut editor's logic, with no page code: cuts.html draws it, converter/test_editor_core.mjs tests it.
 //
 // A course is a list of segments that tile the book's blocks in order. Each segment
 // is a lesson or a skipped range: {kind: "lesson" | "skip", a, b, subject, lead_in,
@@ -48,7 +48,7 @@
       if (plan[key] !== undefined) out[key] = plan[key];
     }
     Object.assign(out, extra || {});
-    out.planned_by = "edited in editor.html";
+    out.planned_by = "edited in the cut editor";
     out.edited = new Date().toISOString().slice(0, 19) + "Z";
     out.lessons = segs.filter((s) => s.kind === "lesson").map((s) => ({
       first_block: blocks[s.a].id, last_block: blocks[s.b].id,

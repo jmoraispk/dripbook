@@ -715,7 +715,7 @@ def node_command():
 
 
 class EditorCoreTests(unittest.TestCase):
-    """The cut editor's logic (editor-core.js) has its own tests in test_editor_core.mjs."""
+    """The cut editor's logic (site/cuts-core.js) has its own tests in test_editor_core.mjs."""
 
     def test_editor_core(self):
         node = node_command()
@@ -744,7 +744,7 @@ class EditorCoreTests(unittest.TestCase):
 
 
 class CutsTests(unittest.TestCase):
-    """cuts.json, which editor.html saves for a bare PDF, names positions on pages instead of block ids."""
+    """cuts.json, which the cut editor (site/cuts.html) saves for a bare PDF, names positions on pages instead of block ids."""
 
     def blocks(self):
         spec = [(1, 100, "heading", "Contents"), (1, 200, "paragraph", "1 Start . . . 3"),
@@ -795,7 +795,7 @@ class CutsTests(unittest.TestCase):
             course = json.loads((tmp / "o" / "lessons.json").read_text())
             self.assertEqual([l["subject"] for l in course["lessons"]], ["One", "Two"])
             self.assertEqual(course["lessons"][1]["first_block"], blocks[5]["id"])
-            self.assertEqual(course["planned_by"], "cuts.json from editor.html")
+            self.assertEqual(course["planned_by"], "cuts.json from the cut editor")
 
 
 THINK_PYTHON = HERE / "output" / "thinkpython2.pdf"

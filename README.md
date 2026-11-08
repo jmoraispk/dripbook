@@ -3,11 +3,11 @@ Turn your ebook into a paid email course. Where it's heading: [ROADMAP.md](ROADM
 
 | Path | What it is |
 |---|---|
-| `site/` | The public landing page. Plain HTML and CSS, no build step. |
+| `site/` | The public landing page, plus `cuts.html`, the cut editor. Plain HTML and CSS, no build step. |
 | `scripts/site_check.py` | Pre-launch check for `site/`: broken links and unfilled settings. |
 | `vercel.json` | Hosting config: serves `site/` on Vercel. |
 | `discovery/` | Customer discovery: finds ebook creators to pitch. Not part of the website. |
-| `converter/` | Turns an ebook PDF into daily lessons, plus `editor.html` for adjusting where they're cut. |
+| `converter/` | Turns an ebook PDF into daily lessons. |
 
 ## Website
 
@@ -122,7 +122,7 @@ Known limits: scanned PDFs (no OCR), two-column layouts, and math formulas, whic
 
 ### Cut editor
 
-`converter/editor.html` is a page for cutting a book into lessons. Open it in a browser straight from disk (no server needed), then drop in a PDF. Nothing is uploaded: the PDF is read in the browser.
+The cut editor is a page for cutting a book into lessons, at [dripbook.ai/cuts](https://dripbook.ai/cuts) (`site/cuts.html`). It also works opened straight from disk. The site's Upload PDF button leads authors there: they drop in their PDF, adjust the cuts, save `cuts.json`, and send both through the Dropbox upload page. Nothing is uploaded: the PDF is read in the browser.
 
 - **A PDF on its own** (what an author would do): the page reads the text and starts with one lesson per chapter, using the PDF's bookmarks or else its largest headings. The front matter, contents and index are skipped. **Split long lessons** cuts every chapter over 6½ minutes at its sections. **Save cuts.json** downloads where each cut is, as a page and a height on it plus the first words after it. Render it with `uv run converter/extract_pymupdf.py book.pdf --cuts cuts.json`. Opening the PDF again with that `cuts.json` (or **Open saved cuts**) picks up where you left off.
 - **A PDF with its `lessons.json`** from the converter edits that plan instead, with the converter's own paragraphs and figures. **Save lessons.json** goes back through `--plan` (add the same `--pages` if you used it).
@@ -130,4 +130,4 @@ Known limits: scanned PDFs (no OCR), two-column layouts, and math formulas, whic
 - **One lesson:** its pages large, with its two cuts as black lines. Drag a line to move that cut; it snaps to the gaps between paragraphs. Point at a page and click **Cut here** to split the lesson. You can also merge with the next or previous lesson, skip pages, split at sections, and edit the subject, intro and "Tomorrow" lines while seeing what readers get.
 - Undo and redo, read times and warnings update as you go. Unsaved edits survive a reload.
 
-The cut logic is in `editor-core.js`, with tests in `test_editor_core.mjs`, which run as part of `python3 -m unittest discover -s converter` when Node.js is available (uv can fetch it). The page loads PDF.js from jsDelivr, so it needs an internet connection.
+The cut logic is in `site/cuts-core.js`, with tests in `converter/test_editor_core.mjs`, which run as part of `python3 -m unittest discover -s converter` when Node.js is available (uv can fetch it). The page loads PDF.js from jsDelivr, so it needs an internet connection.

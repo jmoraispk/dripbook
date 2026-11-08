@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dripbook cut editor</title>
+<title>Cut your book into lessons · Dripbook</title>
+<meta name="description" content="Open your book's PDF, see where each daily lesson starts, and move the cuts. Your PDF stays on your computer.">
+<meta name="theme-color" content="#141B33">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap">
@@ -22,7 +25,9 @@ button{cursor:pointer}
 /* top bar */
 .bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:12px 20px;background:var(--surface);border-bottom:1.5px solid var(--ink)}
 .brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:18px;letter-spacing:-.02em;white-space:nowrap}
+.brand{color:inherit;text-decoration:none}
 .brand svg{stroke:var(--ink)}
+.brand .sub{font-weight:600;color:var(--muted)}
 .book{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:28ch}
 .stats{color:var(--muted);font-size:14px}
 .spacer{flex:1}
@@ -55,7 +60,7 @@ main{flex:1;min-height:0;display:flex}
 .status{font-weight:600}
 .status progress{width:100%;accent-color:var(--ribbon)}
 .pick label em{font-style:normal;font-weight:500;color:var(--muted)}
-label.btn{display:inline-flex;align-items:center;cursor:pointer}
+label.btn,a.btn{display:inline-flex;align-items:center;cursor:pointer;text-decoration:none;color:inherit}
 .note{font-size:13px;color:var(--muted);margin:0 0 10px}
 
 /* lesson list */
@@ -140,6 +145,7 @@ label.btn{display:inline-flex;align-items:center;cursor:pointer}
 /* banners */
 .banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 20px;background:var(--ribbon-soft);border-bottom:1px solid var(--line);font-size:14px}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:12px;font-size:14px;max-width:min(680px,92vw);box-shadow:0 6px 24px rgba(20,27,51,.3);z-index:20}
+.toast a{color:var(--ribbon);font-weight:700}
 .toast code{font-family:var(--mono);font-size:12.5px;background:rgba(255,255,255,.12);border-radius:4px;padding:1px 5px;user-select:all}
 #selftest{position:fixed;right:12px;bottom:12px;z-index:30;background:#fff;border:2px solid var(--ink);border-radius:10px;padding:10px 14px;font:13px/1.5 var(--mono);white-space:pre;max-height:60vh;overflow:auto}
 
@@ -149,11 +155,11 @@ label.btn{display:inline-flex;align-items:center;cursor:pointer}
   .panel{width:auto;flex:0 0 auto;border-left:0;border-top:1px solid var(--line)}
 }
 </style>
-<script src="editor-core.js"></script>
+<script src="cuts-core.js"></script>
 </head>
 <body>
 <header class="bar">
-  <span class="brand"><svg width="22" height="25" viewBox="0 0 28 32" fill="none" aria-hidden="true"><path d="M3 2h15l7 7v16a2 2 0 0 1-2 2H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke-width="2.2" stroke-linejoin="round"/><path d="M18 2v7h7" stroke-width="2.2" stroke-linejoin="round"/><path d="M13 13v9m-3.5-3.5L13 22l3.5-3.5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Cut editor</span>
+  <a class="brand" href="index.html"><svg width="26" height="28" viewBox="0 0 28 30" fill="none" aria-hidden="true"><path d="M14 6.5C11.5 4.5 7.5 3.5 3 4v15c4.5-.5 8.5.5 11 2.5 2.5-2 6.5-3 11-2.5V4c-4.5-.5-8.5.5-11 2.5z" stroke-width="2.2" stroke-linejoin="round"/><path d="M14 6.5v15" stroke-width="2.2"/><path d="M14 21.5s-3 3.4-3 5.3a3 3 0 0 0 6 0c0-1.9-3-5.3-3-5.3z" fill="#F4B425" stroke="none"/></svg>Dripbook <span class="sub">cuts</span></a>
   <span class="book" id="book"></span>
   <span class="stats" id="stats"></span>
   <span class="spacer"></span>
@@ -164,6 +170,7 @@ label.btn{display:inline-flex;align-items:center;cursor:pointer}
   <label class="btn" id="open-cuts" hidden title="Put saved cuts back onto this book">Open saved cuts<input type="file" accept="application/json,.json" id="in-cuts" hidden></label>
   <label class="free" id="free-wrap" hidden>Free lessons <input type="number" id="free" min="1" max="99"></label>
   <button type="button" class="btn btn-primary" id="save" disabled hidden title="Save (Ctrl+S)">Save lessons.json</button>
+  <a class="btn" id="send" hidden href="https://www.dropbox.com/request/dtds3axh71m4jur0v85d" target="_blank" rel="noopener" title="Opens our Dropbox upload page in a new tab">Send to Dripbook</a>
 </header>
 <div class="banner" id="draft" hidden></div>
 <main>
@@ -171,9 +178,10 @@ label.btn{display:inline-flex;align-items:center;cursor:pointer}
     <div class="drop" id="drop">
       <h1>Cut your book into daily lessons</h1>
       <p>Drop your book's PDF here. It opens in this browser and stays on your computer: nothing is uploaded. We start you off with one lesson per chapter, and you move the cuts wherever you like.</p>
+      <p>When you're happy, save your cuts and send them to us with your PDF. We email you a preview of every lesson before anything goes live.</p>
       <div class="pick">
         <label id="pick-pdf"><strong>Book PDF</strong><span>Choose a file…</span><input type="file" accept="application/pdf,.pdf" id="in-pdf"></label>
-        <label id="pick-plan"><strong>Saved cuts <em>(optional)</em></strong><span>cuts.json or lessons.json; choose it first</span><input type="file" accept="application/json,.json" id="in-plan"></label>
+        <label id="pick-plan"><strong>Saved cuts <em>(optional)</em></strong><span>A cuts.json you saved before; choose it first</span><input type="file" accept="application/json,.json" id="in-plan"></label>
       </div>
       <p class="status" id="start-status" hidden></p>
       <p class="error" id="start-error" hidden></p>
@@ -383,6 +391,7 @@ async function open(data, pdfName, jsonText) {
   status("");
   $("#start").hidden = true;
   for (const id of ["#tabs", "#free-wrap", "#undo", "#redo", "#save", "#split-long", "#open-cuts"]) $(id).hidden = false;
+  $("#send").hidden = mode !== "pdf";
   $("#free").value = S.plan.settings.free_lessons || 3;
   shownPages = "";
   buildOverview();
@@ -482,8 +491,8 @@ function save() {
     const pages = S.plan.source?.pages ? ` --pages ${S.plan.source.pages[0]}-${S.plan.source.pages[1]}` : "";
     toast(`Saved lessons.json. Render the pages from it with<br><code>uv run converter/extract_${esc(engine)}.py ${esc(S.pdfName)}${pages} --plan lessons.json</code>`, 12000);
   } else {
-    toast(`Saved cuts.json to your downloads. Send it to us together with your PDF.` +
-      (local ? `<br>Render it with <code>uv run converter/extract_pymupdf.py ${esc(S.pdfName)} --cuts cuts.json</code>` : ""), 12000);
+    toast(`Saved cuts.json to your downloads. Now <a href="${esc($("#send").href)}" target="_blank" rel="noopener">send it with your PDF</a>: the upload page takes both files, plus your name and email.` +
+      (local ? `<br>Render it with <code>uv run converter/extract_pymupdf.py ${esc(S.pdfName)} --cuts cuts.json</code>` : ""), 15000);
   }
 }
 

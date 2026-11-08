@@ -16,7 +16,7 @@ read in a browser or sent as an email, plus a plain-text version.
   uv run converter/convert.py BOOK.pdf --pages 23-38            # use part of a PDF, e.g. skip the front matter
   uv run converter/convert.py BOOK.pdf --engine pymupdf         # read the PDF with PyMuPDF instead of pdfplumber
   uv run converter/convert.py BOOK.pdf --plan lessons.json      # render a plan you edited by hand
-  uv run converter/convert.py BOOK.pdf --cuts cuts.json         # render the cuts made in editor.html
+  uv run converter/convert.py BOOK.pdf --cuts cuts.json         # render the cuts made in the cut editor (site/cuts.html)
   uv run converter/convert.py BOOK.pdf --blocks                 # print the numbered blocks a plan refers to
   uv run converter/convert.py https://example.com/sample.pdf    # a URL works too
 
@@ -814,7 +814,7 @@ def split_by_headings(blocks, target=900, most=1300, least=450):
 
 
 def block_at(blocks, page, y, words=""):
-    """The first block at or below height `y` on `page`, as editor.html places cuts.
+    """The first block at or below height `y` on `page`, as the cut editor places cuts.
 
     With `words`, a block on that page whose text starts with them wins (the nearest
     one), since the browser and this script measure positions a little differently.
@@ -832,13 +832,13 @@ def block_at(blocks, page, y, words=""):
 
 
 def plan_from_cuts(cuts, blocks):
-    """Turn the cuts.json that editor.html saves into a plan. Returns (plan, warnings).
+    """Turn the cuts.json that the cut editor saves into a plan. Returns (plan, warnings).
 
     Each segment starts at a position on a page and runs until the next one starts.
     A segment whose start lands on the same block as the one before it is dropped.
     """
     plan = {"book": cuts.get("book") or {}, "settings": cuts.get("settings") or {}, "source": cuts.get("source") or {},
-            "lessons": [], "skipped": [], "cta_note": "", "planned_by": "cuts.json from editor.html"}
+            "lessons": [], "skipped": [], "cta_note": "", "planned_by": "cuts.json from the cut editor"}
     starts, warnings = [], []
     for n, c in enumerate(cuts.get("segments") or [], 1):
         j = block_at(blocks, c["page"], c["y"], c.get("first_words", "")) if starts else 0
@@ -1050,7 +1050,7 @@ def build_course(raw, doc, settings):
         "skipped": skipped,
         "warnings": doc["warnings"] + warnings,
         "lessons": lessons,
-        # Every block of the source, so the cut editor (editor.html) can move a cut anywhere.
+        # Every block of the source, so the cut editor (site/cuts.html) can move a cut anywhere.
         "all_blocks": [dict(b, words=block_words(b)) for b in blocks],
     }
     return course, []
@@ -1795,7 +1795,7 @@ def main(argv=None):
     parser.add_argument("--engine", choices=sorted(ENGINES), default="pdfplumber",
                         help="library that reads the PDF (default: pdfplumber)")
     parser.add_argument("--plan", help="render this plan (a lessons.json) instead of splitting by headings")
-    parser.add_argument("--cuts", help="render the cuts.json saved by editor.html instead of splitting by headings")
+    parser.add_argument("--cuts", help="render the cuts.json saved by the cut editor (site/cuts.html) instead of splitting by headings")
     parser.add_argument("--target-words", type=int, default=900,
                         help="words per lesson when splitting by headings (default: 900, about 4 minutes)")
     parser.add_argument("--free", type=int,

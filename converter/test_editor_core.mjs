@@ -1,10 +1,10 @@
-// Tests for editor-core.js: node --test converter/test_editor_core.mjs
+// Tests for the cut editor's logic, site/cuts-core.js: node --test converter/test_editor_core.mjs
 // No Node installed? uvx --from nodejs-wheel node --test converter/test_editor_core.mjs
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {createRequire} from "node:module";
 
-const C = createRequire(import.meta.url)("./editor-core.js");
+const C = createRequire(import.meta.url)("../site/cuts-core.js");
 
 // Blocks on pages 1-3: a chapter heading, paragraphs, a list, code and a section heading.
 function book() {
@@ -112,7 +112,7 @@ test("writes the plan back with block ids, keeping the book's details", () => {
   assert.deepEqual(out.lessons.map((l) => [l.first_block, l.last_block]), [["p1.1", "p1.4"], ["p2.1", "p3.1"]]);
   assert.equal(out.book.title, "T");
   assert.equal(out.all_blocks.length, 9);
-  assert.equal(out.planned_by, "edited in editor.html");
+  assert.equal(out.planned_by, "edited in the cut editor");
 });
 
 // ------------------------------------------------------------- a bare PDF, read in the browser
