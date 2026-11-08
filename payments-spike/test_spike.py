@@ -37,6 +37,13 @@ def sign(payload, secret=SECRET):
     return f"t={t},v1={sig}"
 
 
+def paid_event(reader="r_7", payment_intent="pi_9"):
+    return {
+        "id": "evt_1", "object": "event", "type": "checkout.session.completed",
+        "data": {"object": {"client_reference_id": reader, "payment_intent": payment_intent, "amount_total": 2000}},
+    }
+
+
 class TempState(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -47,36 +54,22 @@ class TempState(unittest.TestCase):
 
 
 class FeeTest(unittest.TestCase):
-    def test_ten_percent_above_twenty_dollars(self):
-        self.assertEqual(spike.application_fee(4900), 490)
-        self.assertEqual(spike.application_fee(9900), 990)
-
-    def test_two_dollar_minimum(self):
-        self.assertEqual(spike.application_fee(2000), 200)
-        self.assertEqual(spike.application_fee(900), 200)
-
-    def test_never_more_than_the_price(self):
-        self.assertEqual(spike.application_fee(150), 150)
+    def test_stripe_fee(self):
+        self.assertEqual(spike.stripe_fee(2000), 88)
+        self.assertEqual(spike.stripe_fee(4900), 172)
 
 
 class HandleEventTest(TempState):
     def test_paid_checkout_records_the_payment_intent(self):
-        spike.save_state(account="acct_1", last_sale={"session": "cs_1", "fee": 200})
-        line = spike.handle_event({
-            "type": "checkout.session.completed",
-            "account": "acct_1",
-            "data": {"object": {"client_reference_id": "r_7", "payment_intent": "pi_9"}},
-        })
-        self.assertIn("reader r_7 on acct_1", line)
-        self.assertEqual(spike.load_state()["last_sale"], {"session": "cs_1", "fee": 200, "payment_intent": "pi_9"})
+        spike.save_state(last_sale={"session": "cs_1", "price": 2000})
+        line = spike.handle_event(paid_event())
+        self.assertIn("reader r_7, $20.00", line)
+        self.assertEqual(spike.load_state()["last_sale"], {"session": "cs_1", "price": 2000, "payment_intent": "pi_9"})
 
-    def test_account_updated_reports_charges(self):
-        line = spike.handle_event({
-            "type": "account.updated",
-            "account": "acct_1",
-            "data": {"object": {"id": "acct_1", "charges_enabled": True, "payouts_enabled": False}},
-        })
-        self.assertIn("charges_enabled=True", line)
+    def test_other_events_are_ignored(self):
+        line = spike.handle_event({"type": "charge.refunded", "data": {"object": {}}})
+        self.assertEqual(line, "ignored charge.refunded")
+        self.assertEqual(spike.load_state(), {})
 
 
 class KeyGuardTest(unittest.TestCase):
@@ -111,16 +104,13 @@ class WebhookServerTest(TempState):
             return e.code
 
     def test_signed_event_is_accepted(self):
-        payload = json.dumps({
-            "id": "evt_1", "object": "event", "type": "checkout.session.completed", "account": "acct_1",
-            "data": {"object": {"client_reference_id": "r_1", "payment_intent": "pi_1"}},
-        })
+        payload = json.dumps(paid_event(reader="r_1", payment_intent="pi_1"))
         with mock.patch("builtins.print"):
             self.assertEqual(self.post(payload, sign(payload)), 200)
         self.assertEqual(spike.load_state()["last_sale"]["payment_intent"], "pi_1")
 
     def test_bad_signature_is_rejected(self):
-        payload = json.dumps({"id": "evt_2", "object": "event", "type": "account.updated", "data": {"object": {}}})
+        payload = json.dumps(paid_event())
         with mock.patch("builtins.print"):
             self.assertEqual(self.post(payload, sign(payload, "whsec_wrong")), 400)
         self.assertEqual(spike.load_state(), {})

@@ -8,6 +8,8 @@ Turn your ebook into a paid email course. Where it's heading: [ROADMAP.md](ROADM
 | `vercel.json` | Hosting config: serves `site/` on Vercel. |
 | `discovery/` | Customer discovery: finds ebook creators to pitch. Not part of the website. |
 | `converter/` | Turns an ebook PDF into daily lessons. |
+| `payments-spike/` | Test sale through Stripe Checkout, in a sandbox. Setup in `docs/email-delivery.md`. |
+| `email-spike/` | Test send of one lesson through Postmark. |
 
 ## Website
 

@@ -1,51 +1,30 @@
-# Email and payments: decisions
+# Email and payments: setup
 
-*Decided 2026-10-14, with prices checked the same day. Domain: **dripbook.ai**.*
+*Updated 2026-11-08. Domain: **dripbook.ai**.*
 
-## What the creator does
+**Plan for now:** Dripbook sells drips of public-domain books itself. There are no creator payouts, so we use a plain Stripe account and no Stripe Connect. Connect comes back when creators join. The 2026-10-14 version of this doc covers it, in git history.
 
-They send us the PDF, then click one Stripe link to say where their money goes. They don't need an email provider, a domain or an existing Stripe account.
+## Postmark (email)
 
-## Email: Postmark on our domain
+1. Sign up at postmarkapp.com and create a server called "Dripbook". Under **Message Streams**, make sure there's a Broadcast stream with the ID `broadcast`. Lessons go out on it, and Postmark adds the unsubscribe link and headers. Receipts and sign-in links use the default transactional stream, `outbound`.
+2. Go to **Sender Signatures → Add Domain** and enter `mail.dripbook.ai`. Add the DKIM TXT record and the Return-Path CNAME it shows at your DNS provider, then click **Verify**.
+3. Add a TXT record at `_dmarc.dripbook.ai` with the value `v=DMARC1; p=none; rua=mailto:dmarc@dripbook.ai`. Change `p=none` to `p=quarantine` once a few weeks of reports are clean.
+4. **Request approval.** Say that readers sign up for daily lessons of public-domain books, confirm by email, and can unsubscribe in one click, with no bought lists. Until Postmark approves the account, it only delivers to addresses at dripbook.ai, so you need a mailbox (or forwarding) there.
+5. Copy the token under **API Tokens** and send a test (instructions in [email-spike/](../email-spike/README.md)). In Gmail, open **Show original** and check that SPF, DKIM and DMARC all say PASS.
 
-- Lessons come from `Practical Rust <lessons@mail.dripbook.ai>`, with `Reply-To:` set to the creator's address, so readers' replies go straight to them. The creator sets nothing up.
-- One-time DNS on dripbook.ai: Postmark's DKIM record and Return-Path CNAME on `mail.dripbook.ai`, plus `_dmarc.dripbook.ai` set to `v=DMARC1; p=none; rua=mailto:…`. Move it to `quarantine` once reports are clean.
-- Lessons go out on a Broadcast stream, and confirmations and receipts on the Transactional stream. Every lesson gets one-click unsubscribe (`List-Unsubscribe` headers). Readers confirm their sign-up by email (double opt-in).
-- **Images** live in Vercel Blob (a public store), with only their URLs in Postgres and in the email HTML. Postgres can store image files, but email needs public image URLs anyway, and Gmail strips embedded base64 images.
-  - Keep each lesson's HTML under ~100 KB, because Gmail cuts off longer emails.
-  - Always set alt text, because some email apps block images by default.
-  - Cost: a few cents a month at our scale. Even 1,000 sales a month is roughly 7 GB of image traffic, about $0.35.
-- Cold outreach to creators never goes through Postmark. It comes from your personal mailbox.
+Images go in Vercel Blob, and only their URLs go in the HTML. Keep each lesson under ~100 KB, because Gmail cuts off longer emails.
 
-## Payments: Stripe Connect, direct charges, creator pays card fees
+## Stripe (payments)
 
-- When a creator is ready to sell, we create a connected account for them and send them Stripe's hosted onboarding link. They fill in their identity and bank details in about 5 minutes, and get a lightweight Express dashboard.
-  - Settings: `fees.payer=account`, `losses.payments=stripe`, `requirement_collection=stripe`, `stripe_dashboard.type=express`.
-  - Stripe's docs don't list this combination as unsupported. Confirm it in Stripe's Connect setup wizard before building.
-- Each Checkout Session runs on the creator's account with `application_fee_amount = max(10% of price, $2)`. Stripe takes its card fee from the creator. Our fee arrives clean, with no per-account or payout fees.
-- The identity form can't be skipped. Anyone receiving payouts must be verified. Collecting all the money ourselves and paying creators by hand would make Dripbook the seller, responsible for sales tax and VAT everywhere. It would also break Stripe's rules on collecting money for others, which Connect exists to handle.
+1. Sign up at stripe.com and switch to a sandbox. Under **Settings → Business**, set the public name "Dripbook", a support email and the statement descriptor `DRIPBOOK`, which is what appears on card statements. Add a logo under **Settings → Branding**.
+2. Copy the sandbox secret key (`sk_test_...`) from **Developers → API keys**. Install the Stripe CLI and run `stripe login`.
+3. Run a test sale (instructions in [payments-spike/](../payments-spike/README.md)). The last free lesson links to Checkout. When a `checkout.session.completed` webhook arrives, the reader is marked paid and the remaining lessons unlock.
+4. **Before live:** activate the account (business and bank details), add a live webhook endpoint at `https://dripbook.ai/api/stripe-webhook`, and move Vercel to Pro, because Hobby is non-commercial only.
 
-## Costs
+Each $20 sale costs 2.9% + 30¢ in card fees, so Dripbook keeps $19.12. Fixed costs: Postmark $15/mo and Vercel Pro $20/mo.
 
-| Item | Cost |
-|---|---|
-| Postmark Basic | $15/mo for 10k emails, then $1.80 per 1k. Pro is cheaper above ~13k emails. |
-| Vercel Pro | $20/mo, needed from the first paid sale (Hobby is non-commercial only) |
-| Neon Postgres, Vercel Blob | ~$0 at this scale |
-| **Fixed total** | **~$36/mo, plus the domain** |
+## Decide before selling
 
-Each sale uses about 67 emails, assuming 10% of free readers buy, which is about $0.12. At $20 we keep $1.88 per sale, so ~20 sales a month cover fixed costs. At $49 we keep $4.78, so ~8 do.
-
-Converting a book is a one-time cost per book, not per sale. AI processing that costs $5 a book is paid back by the first 3 sales at $20.
-
-## Build order
-
-1. Open a Postmark account and add `mail.dripbook.ai` with the DNS above. Apply with the site live, because Postmark reviews new accounts by hand.
-2. Store the converter's lessons in Postgres and their images in Blob.
-3. Build the course page: sign-up, confirmation email, lesson 1 sent right away.
-4. Add a daily Vercel Cron sender, plus pause, "send the next one now" and unsubscribe.
-   - Pause and "send the next one now" open a page with a button. Corporate link scanners open every link, so these must never act on the click itself.
-5. Add Stripe Connect onboarding, then Checkout. A `checkout.session.completed` webhook unlocks the remaining lessons.
-6. Pilot with one creator, and move to Vercel Pro just before the first paid sale.
-
-Sources (checked 2026-10-14): [Postmark pricing](https://postmarkapp.com/pricing), [Stripe pricing](https://stripe.com/pricing), [Connect pricing](https://stripe.com/connect/pricing), [Connect controller properties](https://docs.stripe.com/connect/migrate-to-controller-properties), [Vercel Blob pricing](https://vercel.com/docs/vercel-blob/usage-and-pricing), [Vercel Hobby](https://vercel.com/docs/plans/hobby), [Gmail sender rules](https://support.google.com/a/answer/81126).
+- **Sales tax and VAT.** Dripbook is now the seller, so it owes tax wherever the law requires it. Digital sales to EU buyers owe VAT from the first sale. Stripe Tax can calculate and collect it (0.5% per sale). Check with an accountant where you have to register.
+- **Is it really public domain?** Pick books that are public domain in both the US and the EU: published before 1930, and the author died over 70 years ago. Translations have their own copyright. If the text comes from Project Gutenberg, remove its header, footer and name before selling.
+- **Think Python can't be sold.** The demo book is licensed CC BY-NC (non-commercial).
