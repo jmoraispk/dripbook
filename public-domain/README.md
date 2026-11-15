@@ -15,6 +15,18 @@ Two columns need a look:
 
 The download links follow from `gutenberg_id`. For example, `https://www.gutenberg.org/cache/epub/1342/pg1342-h.zip` is the HTML with images for ID 1342. Gutenberg blocks automated bulk downloads from its website, so fetch many books from a mirror.
 
+## Downloading the books
+
+```bash
+python3 public-domain/download.py              # all 1,000 books, about 6 GB, an hour or more
+python3 public-domain/download.py --limit 5    # trial run
+python3 public-domain/download.py --formats txt   # only the plain text
+```
+
+Each book gets a folder, `books/{id}/`, holding `pg{id}-h.zip` (HTML with images) and `pg{id}.txt` (UTF-8 text). The `books/` folder is git-ignored and must never be committed.
+
+The script reads from Gutenberg's own mirror (gutenberg.pglaf.org), as its [robot policy](https://www.gutenberg.org/policy/robot_access.html) asks, one file at a time with a one-second pause. Files already downloaded are skipped, so you can stop it with Ctrl-C and run it again to resume. Any file it can't get is listed with a reason in `books/failed.csv`; a re-run retries those.
+
 ## Rebuilding
 
 The cut-off year moves forward each January:

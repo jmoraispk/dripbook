@@ -26,5 +26,5 @@ Each $20 sale costs 2.9% + 30¢ in card fees, so Dripbook keeps $19.12. Fixed co
 ## Decide before selling
 
 - **Sales tax and VAT.** Dripbook is now the seller, so it owes tax wherever the law requires it. Digital sales to EU buyers owe VAT from the first sale. Stripe Tax can calculate and collect it (0.5% per sale). Check with an accountant where you have to register.
-- **Is it really public domain?** Pick books that are public domain in both the US and the EU: published before 1930, and the author died over 70 years ago. Translations have their own copyright. If the text comes from Project Gutenberg, remove its header, footer and name before selling.
+- **Is it really public domain?** Pick books that are public domain in both the US and the EU. As of 2026 that means the book was published in 1930 or earlier (US) and the author died in 1955 or earlier (EU). Translations, introductions and footnotes have their own copyright, so use an old translation and leave out modern notes. If the text comes from Project Gutenberg, remove its header, footer and name before selling.
 - **Think Python can't be sold.** The demo book is licensed CC BY-NC (non-commercial).
