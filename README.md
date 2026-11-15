@@ -10,6 +10,7 @@ Turn your ebook into a paid email course. Where it's heading: [ROADMAP.md](ROADM
 | `converter/` | Turns an ebook PDF into daily lessons. |
 | `payments-spike/` | Test sale through Stripe Checkout, in a sandbox. Setup in `docs/email-delivery.md`. |
 | `email-spike/` | Test send of one lesson through Postmark. |
+| `public-domain/` | 1,000 Gutenberg books that are public domain in the US and the EU, so Dripbook can sell them. |
 
 ## Website
 
