@@ -3,214 +3,198 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Dripbook: turn your ebook into a paid email course</title>
-<meta name="description" content="Dripbook turns your non-fiction ebook into short daily email lessons you can sell. Readers get a free preview, then pay to unlock the rest.">
-<meta name="theme-color" content="#141B33">
+<title>Dripbook: the classics, a few minutes every morning</title>
+<meta name="description" content="Dripbook sends a great book to your inbox in short daily parts. Pick from 1,000 classics, choose your pace, and finish the books you always meant to read.">
+<meta name="theme-color" content="#15203B">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Dripbook">
-<meta property="og:title" content="Turn your ebook into a paid email course">
-<meta property="og:description" content="Upload a PDF. Dripbook splits it into daily lessons, gives you a page to sell them from, and sends every email for you.">
+<meta property="og:title" content="The classics, a few minutes every morning">
+<meta property="og:description" content="Pick a classic. Dripbook sends it to your inbox in short daily parts until you've read every word.">
 <meta property="og:image" content="{{SITE_URL}}/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Dripbook: turn your ebook into a paid email course">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400..700&family=Literata:ital,opsz,wght@0,7..72,400..700;1,7..72,400..600&display=swap">
+<link rel="stylesheet" href="home.css">
 </head>
 <body>
 
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="drop" viewBox="0 0 14 19"><path d="M7 0S0 8 0 12.2a7 7 0 0 0 14 0C14 8 7 0 7 0z"/></symbol>
+</svg>
+
 <header class="wrap nav">
-  <a href="#top" class="brand">
-    <svg width="30" height="32" viewBox="0 0 28 30" fill="none" aria-hidden="true" class="icon"><path d="M14 6.5C11.5 4.5 7.5 3.5 3 4v15c4.5-.5 8.5.5 11 2.5 2.5-2 6.5-3 11-2.5V4c-4.5-.5-8.5.5-11 2.5z" stroke-width="2.2" stroke-linejoin="round"/><path d="M14 6.5v15" stroke-width="2.2"/><path d="M14 21.5s-3 3.4-3 5.3a3 3 0 0 0 6 0c0-1.9-3-5.3-3-5.3z" fill="#F4B425" stroke="none"/></svg>
+  <a href="/" class="brand" aria-label="Dripbook home">
+    <svg width="28" height="30" viewBox="0 0 28 30" fill="none" aria-hidden="true"><path d="M14 6.5C11.5 4.5 7.5 3.5 3 4v15c4.5-.5 8.5.5 11 2.5 2.5-2 6.5-3 11-2.5V4c-4.5-.5-8.5.5-11 2.5z" stroke-width="2.2" stroke-linejoin="round"/><path d="M14 6.5v15" stroke-width="2.2"/><path d="M14 21.5s-3 3.4-3 5.3a3 3 0 0 0 6 0c0-1.9-3-5.3-3-5.3z" fill="#F2B230" stroke="none"/></svg>
     Dripbook
   </a>
-  <nav aria-label="Main">
+  <nav class="nav-links" aria-label="Main">
+    <a href="#library">Library</a>
     <a href="#how">How it works</a>
-    <a href="#earn">Earnings</a>
-    <a href="#faq">Questions</a>
-    <a href="#start" class="btn">Upload PDF</a>
+    <a href="#start" class="btn">Start free</a>
   </nav>
 </header>
 
 <main>
-  <section id="top" class="wrap hero split">
-    <div class="hero-copy stack">
-      <h1>Turn your ebook into a paid email course.</h1>
-      <p class="lede">Upload a PDF. Dripbook splits it into short daily lessons, gives you a page to sell them from, and sends every email for you. Your readers actually finish the book, and you get paid for each one.</p>
-      <div class="hero-actions">
-        <a href="#start" class="btn btn-lg">Upload PDF</a>
-        <a href="#how" class="link">See how it works</a>
-      </div>
-      <p class="small">Your first book is free to set up. No monthly fee.</p>
+  <section class="wrap hero" aria-labelledby="hero-title">
+    <div class="reading" id="reading">
+      <blockquote class="quote" id="quote" cite="https://www.gutenberg.org/ebooks/1342">
+        <span class="clause" style="--i:0">It is a truth universally acknowledged, </span><span class="clause" style="--i:1">that a single man in possession of a good fortune </span><span class="clause" style="--i:2">must be in want of a wife.</span>
+      </blockquote>
+      <p class="where" id="where">
+        <svg class="drop" aria-hidden="true"><use href="#drop"/></svg>
+        <span><strong id="where-title">Pride and Prejudice</strong>, day 1 of <span id="where-days">58</span>, in your inbox at 7:00</span>
+      </p>
     </div>
 
-    <div class="hero-visual">
-      <div class="ribbon" aria-hidden="true"></div>
-      <div class="inbox" role="img" aria-label="Example: a PDF turned into 18 daily email lessons, with the first three free">
-        <div class="inbox-head">
-          <span class="file-chip">
-            <svg width="14" height="16" viewBox="0 0 14 16" fill="none" aria-hidden="true" class="icon"><path d="M1.5 1h7l4 4v9.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-13a.5.5 0 0 1 .5-.5z" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            practical-rust.pdf
-          </span>
-          <svg width="28" height="12" viewBox="0 0 28 12" fill="none" aria-hidden="true" class="icon"><path d="M1 6h24m-5-5 5 5-5 5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>18 lessons, one a day</span>
-        </div>
-        <div class="row">
-          <span class="day">Day 1</span>
-          <div class="row-text">
-            <span class="subject">Why Rust feels strict at first</span>
-            <span class="preview">If you come from Python, the compiler will feel like a pushy editor. Today we look at what it is protecting you from.</span>
-          </div>
-        </div>
-        <div class="row">
-          <span class="day">Day 2</span>
-          <div class="row-text">
-            <span class="subject">Ownership, in one coffee</span>
-            <span class="preview">Every value has exactly one owner. That single rule explains most of the errors you saw yesterday.</span>
-          </div>
-        </div>
-        <div class="row">
-          <span class="day">Day 3</span>
-          <div class="row-text">
-            <span class="subject">Borrowing without the headache</span>
-            <span class="preview">You can lend a value without giving it away. Here is how to tell the compiler which one you mean.</span>
-          </div>
-        </div>
-        <div class="row row-locked">
-          <span class="day">Day 4+</span>
-          <div class="locked-text"><span>15 more lessons after purchase</span><strong>$49</strong></div>
-        </div>
+    <div class="picker" role="group" aria-label="Choose a book to preview" id="picker"></div>
+
+    <div class="pitch">
+      <h1 id="hero-title">Finish the books you always meant to read.</h1>
+      <div class="side">
+        <p class="lede">Every morning, Dripbook emails you the next part of a classic, about ten minutes long. Pick a book, choose your pace, and read it with your coffee.</p>
+        <form class="join" data-join>
+          <label class="sr" for="email-top">Your email</label>
+          <input id="email-top" type="email" placeholder="Your email" autocomplete="email" required>
+          <button type="submit" class="btn btn-drop" data-book-button>Start Pride and Prejudice</button>
+        </form>
+        <p class="note" role="status" aria-live="polite"></p>
       </div>
-      <p class="caption">Example sequence. The first three lessons are a free preview.</p>
     </div>
   </section>
 
-  <section class="statement">
-    <div class="wrap section split">
-      <p class="big">A PDF waits in a downloads folder. An email shows up every morning.</p>
-      <p class="aside">Your readers already open their inbox every day. Dripbook puts your book there, in pieces small enough to finish before the coffee gets cold.</p>
+  <section class="library section" id="library" aria-labelledby="library-title">
+    <div class="wrap">
+      <div class="head">
+        <h2 id="library-title">A thousand classics. Start any of them.</h2>
+        <p>Novels, philosophy, history and poetry, complete and unabridged. Choose a book to see how long it takes.</p>
+      </div>
+      <div id="shelves"><p class="small">Loading the library…</p></div>
     </div>
   </section>
 
-  <section id="how" class="wrap section stack" style="gap:56px">
-    <div class="stack" style="gap:16px">
-      <p class="eyebrow">How it works</p>
-      <h2>From the book you wrote to a course you sell.</h2>
+  <section class="wrap section" id="how" aria-labelledby="how-title">
+    <div class="head">
+      <h2 id="how-title">Three minutes to set up. Ten a day to read.</h2>
     </div>
     <ol class="steps">
-      <li><span class="step-n">1</span><span class="step-t">Upload your PDF</span><span class="step-d">Drop in the ebook you already have. Dripbook reads its chapters and headings.</span></li>
-      <li><span class="step-n">2</span><span class="step-t">Review your lessons</span><span class="step-d">We split it into short emails that each end at a natural stopping point. Rename subject lines, merge or split lessons, and set the pace.</span></li>
-      <li><span class="step-n">3</span><span class="step-t">Set your price</span><span class="step-d">Pick what a reader pays. We suggest $49 to start. Choose how many lessons are free as a preview.</span></li>
-      <li><span class="step-n">4</span><span class="step-t">Share one link</span><span class="step-d">Post it to your audience. Dripbook handles checkout and sends every lesson on schedule.</span></li>
+      <li><h3>Pick a book</h3><p>Choose from the library. Every book is complete, word for word, in the original order.</p></li>
+      <li><h3>Choose your pace</h3><p>Five, ten or twenty minutes a day, delivered at the hour you like. Change it whenever you want.</p></li>
+      <li><h3>Read each morning</h3><p>Each part ends at a natural break, never mid-scene. Want more? Every email has a link to the next part.</p></li>
     </ol>
-  </section>
 
-  <section id="earn" class="wrap section split" style="align-items:flex-start">
-    <div class="stack" style="flex:1 1 380px">
-      <h2 style="max-width:13ch">You set the price. We earn when you do.</h2>
-      <p class="body">No subscription and no setup fee for your first book. Dripbook keeps a <span class="share">10</span>% share of each sale, and the rest is yours.</p>
-    </div>
-    <div class="calc">
-      <div class="group" role="group" aria-labelledby="price-label">
-        <span id="price-label" class="group-label">Price per reader</span>
-        <div class="pills" data-key="price">
-          <button type="button" class="pill" data-value="19" aria-pressed="false">$19</button>
-          <button type="button" class="pill" data-value="29" aria-pressed="false">$29</button>
-          <button type="button" class="pill" data-value="49" aria-pressed="true">$49</button>
-          <button type="button" class="pill" data-value="79" aria-pressed="false">$79</button>
-          <button type="button" class="pill" data-value="99" aria-pressed="false">$99</button>
+    <div class="planner" aria-labelledby="planner-title">
+      <div class="controls">
+        <h3 id="planner-title" class="sr">Plan your reading</h3>
+        <div>
+          <label for="planner-book">Book</label>
+          <select id="planner-book"></select>
+        </div>
+        <div>
+          <span class="lbl" id="pace-label">Minutes a day</span>
+          <div class="pace" role="group" aria-labelledby="pace-label">
+            <button type="button" data-pace="5" aria-pressed="false">5 min</button>
+            <button type="button" data-pace="10" aria-pressed="true">10 min</button>
+            <button type="button" data-pace="20" aria-pressed="false">20 min</button>
+          </div>
         </div>
       </div>
-      <div class="group" role="group" aria-labelledby="readers-label">
-        <span id="readers-label" class="group-label">Readers who buy</span>
-        <div class="pills" data-key="readers">
-          <button type="button" class="pill" data-value="50" aria-pressed="false">50</button>
-          <button type="button" class="pill" data-value="100" aria-pressed="true">100</button>
-          <button type="button" class="pill" data-value="250" aria-pressed="false">250</button>
-          <button type="button" class="pill" data-value="500" aria-pressed="false">500</button>
-          <button type="button" class="pill" data-value="1000" aria-pressed="false">1,000</button>
-        </div>
-      </div>
-      <div class="result" aria-live="polite">
-        <span class="label">You would earn</span>
-        <span class="amount" id="amount">$4,410</span>
-        <span class="detail" id="detail">from 100 readers at $49, after Dripbook's 10% share</span>
+      <div aria-live="polite">
+        <p class="finish" id="finish">You'd finish <strong>Pride and Prejudice</strong> in 58 mornings.</p>
+        <p class="finish-sub" id="finish-sub"></p>
       </div>
     </div>
   </section>
 
-  <section id="faq" class="wrap section stack faq" style="gap:32px">
-    <h2>Questions creators ask</h2>
-    <div class="faq-list">
-      <details><summary>What kinds of books work best?</summary><p>Non-fiction that teaches: programming, productivity, business and self-help. Anything a reader works through rather than skims.</p></details>
-      <details><summary>Do I need my own email list?</summary><p>No. You share one link. Readers sign up on your course page, and Dripbook sends every lesson.</p></details>
-      <details><summary>Who owns the reader list?</summary><p>You do. Export your readers any time and take them wherever you like.</p></details>
-      <details><summary>Can I sell a book I already sell as a PDF?</summary><p>Yes, as long as you hold the rights. The email course can sit right next to your existing PDF.</p></details>
-      <details><summary>What happens when a reader finishes?</summary><p>The last lesson can point them to whatever you offer next: another book, a coaching call, or your community. You set it up in your dashboard.</p></details>
-      <details><summary>What does it cost?</summary><p>Your first book is free to set up. After that, Dripbook keeps a <span class="share">10</span>% share of each sale. There is no monthly fee.</p></details>
+  <section class="wrap section" id="channels" aria-labelledby="channels-title" style="padding-top:0">
+    <div class="head">
+      <h2 id="channels-title">Email today. Wherever you read, soon.</h2>
+      <p>Your book arrives where you already look each morning. More places are on the way.</p>
+    </div>
+    <ul class="channels">
+      <li class="live">
+        <svg viewBox="0 0 28 28" aria-hidden="true"><rect x="3" y="6" width="22" height="16" rx="2.5"/><path d="m4 8 10 7 10-7"/></svg>
+        <h3>Email</h3>
+        <p>Any inbox: Gmail, Outlook, Apple Mail.</p>
+        <span class="status">Available now</span>
+      </li>
+      <li>
+        <svg viewBox="0 0 28 28" aria-hidden="true"><path d="M5 23l1.6-4.6A9.5 9.5 0 1 1 10 21.6z"/><path d="M11 10.5c0 3.5 3 6.5 6.5 6.5"/></svg>
+        <h3>WhatsApp</h3>
+        <p>Your daily part as a message, between your other chats.</p>
+        <span class="status">Coming soon</span>
+      </li>
+      <li>
+        <svg viewBox="0 0 28 28" aria-hidden="true"><path d="M11 4v20M17 4v20M4 11h20M4 17h20"/></svg>
+        <h3>Slack</h3>
+        <p>A reading break, delivered to your workspace.</p>
+        <span class="status">Coming soon</span>
+      </li>
+      <li>
+        <svg viewBox="0 0 28 28" aria-hidden="true"><path d="M5 17v-3a9 9 0 0 1 18 0v3"/><rect x="4" y="16" width="5" height="8" rx="2"/><rect x="19" y="16" width="5" height="8" rx="2"/></svg>
+        <h3>Audio</h3>
+        <p>Listen to each part on your walk or commute.</p>
+        <span class="status">Coming soon</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="wrap section" id="questions" aria-labelledby="faq-title">
+    <div class="head"><h2 id="faq-title">Questions</h2></div>
+    <div class="faq">
+      <details><summary>Do you shorten or rewrite the books?</summary><p>Never. You get every word of the original, in order. We only decide where each day's part ends, always at a natural break like the end of a scene or chapter.</p></details>
+      <details><summary>How long is each part?</summary><p>You choose: about five, ten or twenty minutes of reading. A ten-minute part is around 2,300 words. You can change your pace at any time.</p></details>
+      <details><summary>Can I read faster on some days?</summary><p>Yes. Every email has a link to get the next part straight away, so you can binge a chapter on a slow Sunday.</p></details>
+      <details><summary>Can I read more than one book at a time?</summary><p>Yes. Each book you start arrives as its own email, so a novel and a philosophy book can run side by side.</p></details>
+      <details><summary>Which books are in the library?</summary><p>A thousand of the most-read classics, from Pride and Prejudice and Moby Dick to Walden, The Republic and The Wealth of Nations. Books by living authors are coming next.</p></details>
+      <details><summary>What if I stop enjoying a book?</summary><p>Stop it from the link at the bottom of any email, and start another whenever you like.</p></details>
     </div>
   </section>
 
-  <section id="start" class="wrap" style="padding-bottom:112px">
-    <div class="cta">
-      <div class="stack" style="gap:20px">
-        <h2>Your book is already written. Send it.</h2>
-        <p class="body">Upload your PDF and we take it from there. Please read these three points first.</p>
-      </div>
-      <div class="upload">
-        <p class="upload-t">Read this before uploading</p>
-        <ol class="notes">
-          <li><span><strong>Make sure you hold the rights.</strong> Leanpub books are fine; KDP Select books are not.</span></li>
-          <li><span><strong>See it before it goes live.</strong> We send you a preview of your lessons and your sales page to approve first.</span></li>
-          <li><span><strong>Leave your email with your PDF.</strong> The upload page asks for it. We will email you there when your sales page is ready.</span></li>
-        </ol>
-        <a class="btn btn-ribbon btn-lg" href="cuts.html">Upload PDF</a>
-        <p class="upload-note">First you see your book cut into daily lessons, and move the cuts if you like. Your PDF stays on your computer until you send it, through a Dropbox upload page. We only use your email to talk to you about your book. <a href="privacy.html">Privacy</a></p>
-      </div>
+  <section class="last section" id="start" aria-labelledby="start-title">
+    <div class="wrap">
+      <h2 id="start-title">Tomorrow morning, page one.</h2>
+      <p class="lede" style="color:inherit;opacity:.8">Leave your email and we'll send the first part of <strong data-book-name>Pride and Prejudice</strong> tomorrow at 7:00.</p>
+      <form class="join" data-join>
+        <label class="sr" for="email-bottom">Your email</label>
+        <input id="email-bottom" type="email" placeholder="Your email" autocomplete="email" required>
+        <button type="submit" class="btn btn-drop">Start reading free</button>
+      </form>
+      <p class="note" role="status" aria-live="polite"></p>
     </div>
   </section>
 </main>
 
 <footer>
   <div class="wrap foot">
-    <span class="brand">Dripbook</span>
-    <div><a href="privacy.html">Privacy</a><a href="mailto:{{CONTACT_EMAIL}}">Contact</a></div>
+    <span>Dripbook</span>
+    <nav aria-label="Footer">
+      <a href="authors.html">For authors</a>
+      <a href="roadmap.html">Roadmap</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="mailto:{{CONTACT_EMAIL}}">Contact</a>
+    </nav>
   </div>
 </footer>
 
-<script>
-(function () {
-  // Placeholder: set your real revenue share here.
-  var SHARE = 10;
-  var state = { price: 49, readers: 100 };
+<dialog id="book-dialog" aria-labelledby="dlg-title">
+  <button type="button" class="close" aria-label="Close" data-close><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3 3 13"/></svg></button>
+  <div class="dlg">
+    <div class="cover" id="dlg-cover"></div>
+    <div class="info">
+      <h3 id="dlg-title"></h3>
+      <p class="by" id="dlg-by"></p>
+      <ul class="facts" id="dlg-facts"></ul>
+      <div class="actions">
+        <button type="button" class="btn btn-drop" id="dlg-start">Start this book</button>
+      </div>
+    </div>
+  </div>
+</dialog>
 
-  document.querySelectorAll('.share').forEach(function (el) { el.textContent = SHARE; });
-
-  function render() {
-    var net = Math.round(state.price * state.readers * (1 - SHARE / 100));
-    document.getElementById('amount').textContent = '$' + net.toLocaleString('en-US');
-    document.getElementById('detail').textContent =
-      'from ' + state.readers.toLocaleString('en-US') + ' readers at $' + state.price + ", after Dripbook's " + SHARE + '% share';
-  }
-
-  document.querySelectorAll('.pills').forEach(function (group) {
-    var key = group.getAttribute('data-key');
-    group.addEventListener('click', function (e) {
-      var btn = e.target.closest('.pill');
-      if (!btn) return;
-      group.querySelectorAll('.pill').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
-      btn.setAttribute('aria-pressed', 'true');
-      state[key] = Number(btn.getAttribute('data-value'));
-      render();
-    });
-  });
-
-  render();
-})();
-</script>
+<script src="home.js"></script>
 </body>
 </html>
