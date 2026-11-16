@@ -1,28 +1,17 @@
-// Dripbook home page: the dripping quote, the library shelves, the reading planner and sign-up.
+// Dripbook home page: rows of covers, genres, search and the book window. Data: library.json (scripts/build_library.py).
 (function () {
   'use strict';
 
   var WORDS_PER_MINUTE = 230;
   var COVER_COLORS = ['#7B2232', '#1F4A3B', '#1E3A66', '#8A6420', '#4A2D5C', '#1F5F68', '#5B3A24', '#33415C'];
+  var NOTE = "Thanks. Dripbook isn't sending yet, so nothing was saved. Sign-up opens soon.";
 
-  // Opening lines, checked against the Gutenberg texts. Clauses arrive one at a time.
-  var OPENINGS = [
-    { id: 1342, title: 'Pride and Prejudice', author: 'Jane Austen', words: 127360,
-      clauses: ['It is a truth universally acknowledged, ', 'that a single man in possession of a good fortune ', 'must be in want of a wife.'] },
-    { id: 2701, title: 'Moby Dick', author: 'Herman Melville', words: 212796,
-      clauses: ['Call me Ishmael. ', 'Some years ago—never mind how long precisely—', 'having little or no money in my purse, ', 'and nothing particular to interest me on shore, ', 'I thought I would sail about a little ', 'and see the watery part of the world.'] },
-    { id: 98, title: 'A Tale of Two Cities', author: 'Charles Dickens', words: 135886,
-      clauses: ['It was the best of times, ', 'it was the worst of times, ', 'it was the age of wisdom, ', 'it was the age of foolishness…'] },
-    { id: 84, title: 'Frankenstein', author: 'Mary Shelley', words: 75042,
-      clauses: ['You will rejoice to hear ', 'that no disaster has accompanied the commencement of an enterprise ', 'which you have regarded with such evil forebodings.'] },
-    { id: 64317, title: 'The Great Gatsby', author: 'F. Scott Fitzgerald', words: 48208,
-      clauses: ['In my younger and more vulnerable years ', 'my father gave me some advice ', 'that I’ve been turning over in my mind ever since.'] }
-  ];
-
-  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var state = { book: OPENINGS[0], pace: 10 };
-  var books = {};                 // id -> book, from the library and the openings
-  OPENINGS.forEach(function (b) { books[b.id] = b; });
+  var lib = null;            // library.json
+  var current = null;        // the book in the dialog
+  var pace = 10;
+  var view = $('#view');
+  var dialog = $('#book-dialog');
+  var search = $('#q');
 
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
@@ -32,244 +21,271 @@
     if (text != null) n.textContent = text;
     return n;
   }
-  function days(book, pace) {
-    return book.words ? Math.max(1, Math.ceil(book.words / (WORDS_PER_MINUTE * pace))) : null;
+  function mornings(book, minutes) {
+    return book.words ? Math.max(1, Math.ceil(book.words / (WORDS_PER_MINUTE * (minutes || 10)))) : null;
   }
+  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+  function fold(s) { return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
 
-  // --- The chosen book flows through the whole page ---------------------------------
-  function choose(book) {
-    state.book = book;
-    $$('[data-book-button]').forEach(function (b) { b.textContent = 'Start ' + book.title; });
-    $$('[data-book-name]').forEach(function (n) { n.textContent = book.title; });
-    var sel = $('#planner-book');
-    if (sel && !$('option[value="' + book.id + '"]', sel) && book.words) {
-      sel.appendChild(el('option', { value: book.id }, book.title));
+  // --- Covers ---------------------------------------------------------------------------
+  function art(id, eager) {
+    var b = lib.books[id];
+    var box = el('div', { class: 'art' });
+    if (b.cover) {
+      var img = el('img', { src: 'covers/' + id + '.webp', alt: '', decoding: 'async' });
+      if (!eager) img.loading = 'lazy';
+      img.onerror = function () { img.replaceWith(cloth(id)); };
+      box.appendChild(img);
+    } else {
+      box.appendChild(cloth(id));
     }
-    if (sel && book.words) sel.value = String(book.id);
-    renderPlan();
+    return box;
+  }
+  function cloth(id) {
+    var b = lib.books[id];
+    var c = el('div', { class: 'cloth', style: '--c:' + COVER_COLORS[id % COVER_COLORS.length] });
+    c.appendChild(el('b', null, b.title));
+    c.appendChild(el('i', null, b.author));
+    return c;
   }
 
-  // --- Hero: the opening line drips in, then the drop lands on "day 1" -------------
-  var quote = $('#quote'), reading = $('#reading'), picker = $('#picker');
-  var heroIndex = 0, timer = null, autoplay = !reduceMotion;
-
-  OPENINGS.forEach(function (b, i) {
-    var btn = el('button', { type: 'button', 'aria-pressed': i === 0 ? 'true' : 'false' }, b.title);
-    btn.addEventListener('click', function () { autoplay = false; clearTimeout(timer); showOpening(i); choose(b); });
-    picker.appendChild(btn);
-  });
-
-  function showOpening(i) {
-    heroIndex = i;
-    var b = OPENINGS[i];
-    $$('button', picker).forEach(function (btn, j) { btn.setAttribute('aria-pressed', j === i ? 'true' : 'false'); });
-    quote.textContent = '';
-    quote.setAttribute('cite', 'https://www.gutenberg.org/ebooks/' + b.id);
-    var text = b.clauses.join('');
-    if (text.length > 150) quote.setAttribute('data-long', ''); else quote.removeAttribute('data-long');
-    b.clauses.forEach(function (c, j) {
-      var span = el('span', { class: 'clause', style: '--i:' + j }, c);
-      quote.appendChild(span);
-    });
-    $('#where-title').textContent = b.title;
-    $('#where-days').textContent = days(b, 10);
-    reading.style.setProperty('--land', (b.clauses.length * 0.26 + 0.35) + 's');
-    if (!reduceMotion) {
-      reading.classList.remove('drip-on');
-      void reading.offsetWidth;  // restart the animation
-      reading.classList.add('drip-on');
+  function card(id, opts) {
+    opts = opts || {};
+    var b = lib.books[id];
+    var li = el('li');
+    if (opts.rank) li.appendChild(el('span', { class: 'num', 'aria-hidden': 'true' }, String(opts.rank)));
+    var btn = el('button', { type: 'button', class: 'book', 'data-id': id,
+      'aria-label': (opts.rank ? 'Number ' + opts.rank + ': ' : '') + b.title + ' by ' + b.author });
+    var a = art(id, opts.eager);
+    var m = mornings(b);
+    if (m) a.appendChild(el('span', { class: 'len', 'aria-hidden': 'true' }, plural(m, 'morning')));
+    btn.appendChild(a);
+    if (opts.meta) {
+      var meta = el('div', { class: 'meta' }, b.title);
+      meta.appendChild(el('span', null, b.author));
+      btn.appendChild(meta);
     }
+    li.appendChild(btn);
+    return li;
   }
 
-  function cycle() {
-    if (!autoplay) return;
-    timer = setTimeout(function () {
-      if (!autoplay) return;
-      quote.classList.add('leaving');
-      setTimeout(function () {
-        quote.classList.remove('leaving');
-        var next = (heroIndex + 1) % OPENINGS.length;
-        showOpening(next);
-        choose(OPENINGS[next]);
-        cycle();
-      }, 400);
-    }, 7000 + OPENINGS[heroIndex].clauses.length * 260);
-  }
-  // Pause the rotation while someone is reading or using the hero.
-  ['mouseenter', 'focusin'].forEach(function (ev) {
-    $('.hero').addEventListener(ev, function () { clearTimeout(timer); });
-  });
-  ['mouseleave', 'focusout'].forEach(function (ev) {
-    $('.hero').addEventListener(ev, function () { clearTimeout(timer); cycle(); });
-  });
-
-  // --- Library shelves ------------------------------------------------------------
-  function colorFor(id) { return COVER_COLORS[id % COVER_COLORS.length]; }
-
-  function fillCover(node, book) {
-    node.style.setProperty('--c', colorFor(book.id));
-    node.textContent = '';
-    var t = el('span', { class: 't' + (book.title.length > 34 ? ' long' : '') }, book.title);
-    var a = el('span', { class: 'a' }, book.author);
-    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', 'mark'); svg.setAttribute('aria-hidden', 'true');
-    var use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
-    use.setAttribute('href', '#drop'); svg.appendChild(use);
-    node.appendChild(t); node.appendChild(a); node.appendChild(svg);
-  }
-
-  function lengthLabel(book) {
-    var d = days(book, 10);
-    return d ? d + (d === 1 ? ' day' : ' days') + ' at 10 min' : 'Daily, 10 min';
-  }
-
-  function bookButton(book) {
-    var btn = el('button', { type: 'button', class: 'book', 'aria-label': book.title + ' by ' + book.author + ', ' + lengthLabel(book) });
-    var cover = el('span', { class: 'cover', 'aria-hidden': 'true' });
-    fillCover(cover, book);
-    btn.appendChild(cover);
-    btn.appendChild(el('span', { class: 'len', 'aria-hidden': 'true' }, lengthLabel(book)));
-    btn.addEventListener('click', function () { openBook(book); });
-    return btn;
-  }
-
-  function shelf(row, index) {
-    var wrap = el('div', { class: 'shelf' });
-    var head = el('div', { class: 'shelf-head' });
-    var id = 'shelf-' + index;
-    head.appendChild(el('h3', { id: id }, row.name));
-    var arrows = el('div', { class: 'arrows' });
-    var prev = el('button', { type: 'button', 'aria-label': 'Scroll ' + row.name + ' left' });
-    var next = el('button', { type: 'button', 'aria-label': 'Scroll ' + row.name + ' right' });
-    prev.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg>';
-    next.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg>';
-    arrows.appendChild(prev); arrows.appendChild(next);
-    head.appendChild(arrows);
-    var list = el('div', { class: 'row', role: 'list', 'aria-labelledby': id });
-    row.books.forEach(function (b, i) {
-      books[b.id] = books[b.id] || b;
-      var item = el('div', { role: 'listitem', class: row.top ? 'ranked' : '' });
-      if (row.top) item.appendChild(el('span', { class: 'rank', 'aria-hidden': 'true' }, String(i + 1)));
-      item.appendChild(bookButton(b));
-      list.appendChild(item);
-    });
-    function step(dir) {
-      list.scrollBy({ left: dir * list.clientWidth * 0.85, behavior: reduceMotion ? 'auto' : 'smooth' });
+  // --- A row of covers that scrolls sideways ----------------------------------------------
+  function row(title, ids, opts) {
+    opts = opts || {};
+    var sec = el('section', { class: 'row' + (opts.ranked ? ' ranked' : '') });
+    var head = el('div', { class: 'row-head' });
+    var h = el('h2', null, title);
+    head.appendChild(h);
+    if (opts.genre) {
+      var more = el('button', { type: 'button', class: 'more', 'data-genre': opts.genre, 'aria-label': 'See all ' + opts.genre }, 'See all');
+      head.appendChild(more);
     }
+    sec.appendChild(head);
+    var wrap = el('div', { class: 'shelf-wrap' });
+    var list = el('ul', { class: 'shelf', 'aria-label': title });
+    ids.forEach(function (id, i) { list.appendChild(card(id, { rank: opts.ranked ? i + 1 : 0, eager: opts.eager && i < 8 })); });
+    var prev = arrowButton('prev', 'Scroll ' + title + ' back', 'M15 5l-7 7 7 7');
+    var next = arrowButton('next', 'Scroll ' + title + ' on', 'M9 5l7 7-7 7');
+    prev.onclick = function () { list.scrollBy({ left: -list.clientWidth * 0.85, behavior: 'smooth' }); };
+    next.onclick = function () { list.scrollBy({ left: list.clientWidth * 0.85, behavior: 'smooth' }); };
     function update() {
-      prev.disabled = list.scrollLeft < 8;
-      next.disabled = list.scrollLeft + list.clientWidth > list.scrollWidth - 8;
+      prev.hidden = list.scrollLeft < 8;
+      next.hidden = list.scrollLeft + list.clientWidth > list.scrollWidth - 8;
     }
-    prev.addEventListener('click', function () { step(-1); });
-    next.addEventListener('click', function () { step(1); });
     list.addEventListener('scroll', update, { passive: true });
     window.addEventListener('resize', update);
-    setTimeout(update, 0);
-    wrap.appendChild(head); wrap.appendChild(list);
-    return wrap;
+    wrap.appendChild(prev); wrap.appendChild(list); wrap.appendChild(next);
+    sec.appendChild(wrap);
+    requestAnimationFrame(update);
+    return sec;
+  }
+  function arrowButton(cls, label, d) {
+    var b = el('button', { type: 'button', class: 'arrow ' + cls, 'aria-label': label, tabindex: '-1' });
+    b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + d + '"/></svg>';
+    return b;
   }
 
-  function loadLibrary() {
-    var target = $('#shelves');
-    fetch('library.json').then(function (r) { return r.json(); }).then(function (data) {
-      target.textContent = '';
-      data.rows.forEach(function (row, i) { target.appendChild(shelf(row, i)); });
-      fillPlannerOptions(data);
-    }).catch(function () {
-      target.textContent = '';
-      target.appendChild(el('p', { class: 'small' }, 'The library could not load. Refresh the page to try again.'));
-      fillPlannerOptions(null);
+  // --- Views ----------------------------------------------------------------------------
+  function setChip(name) {
+    $$('.chip').forEach(function (c) { c.setAttribute('aria-pressed', String(c.dataset.genre === name)); });
+  }
+
+  function showHome() {
+    setChip('');
+    view.textContent = '';
+    lib.rows.forEach(function (r, i) {
+      view.appendChild(row(r.name, r.books, { ranked: r.ranked, genre: r.genre, eager: i < 2 }));
     });
   }
 
-  // --- Book dialog ----------------------------------------------------------------
-  var dialog = $('#book-dialog');
-  function openBook(book) {
-    fillCover($('#dlg-cover'), book);
-    $('#dlg-title').textContent = book.title;
-    $('#dlg-by').textContent = 'by ' + book.author;
-    var facts = $('#dlg-facts');
-    facts.textContent = '';
-    var d10 = days(book, 10), d20 = days(book, 20);
-    if (d10) {
-      facts.appendChild(el('li', null, d10 + ' mornings at 10 minutes a day'));
-      facts.appendChild(el('li', null, d20 + ' mornings at 20 minutes a day'));
-    } else {
-      facts.appendChild(el('li', null, 'Daily parts of about 10 minutes'));
-    }
-    facts.appendChild(el('li', null, 'Complete and unabridged'));
-    if (book.category) facts.appendChild(el('li', null, book.category));
-    $('#dlg-start').textContent = 'Start ' + book.title;
-    $('#dlg-start').onclick = function () {
-      choose(book);
-      dialog.close();
-      $('#start').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' });
-      setTimeout(function () { $('#email-bottom').focus({ preventScroll: true }); }, reduceMotion ? 0 : 500);
-    };
-    if (typeof dialog.showModal === 'function') dialog.showModal();
+  function showGenre(name) {
+    setChip(name);
+    var ids = lib.order.filter(function (id) { return lib.books[id].genres.indexOf(name) >= 0; });
+    view.textContent = '';
+    var head = el('div', { class: 'view-head' });
+    head.appendChild(el('h1', null, name));
+    head.appendChild(el('p', null, plural(ids.length, 'book')));
+    view.appendChild(head);
+    view.appendChild(row('Top 5 in ' + name, ids.slice(0, 5), { ranked: true, eager: true }));
+    grid('Every book in ' + name, ids.slice(5));
   }
-  $('[data-close]', dialog).addEventListener('click', function () { dialog.close(); });
-  dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
 
-  // --- Reading planner ------------------------------------------------------------
-  function fillPlannerOptions(data) {
-    var sel = $('#planner-book');
-    var seen = {};
-    sel.textContent = '';
-    var list = OPENINGS.slice();
-    if (data) data.rows.forEach(function (r) { r.books.forEach(function (b) { if (b.words) list.push(b); }); });
-    list.forEach(function (b) {
-      if (seen[b.id]) return;
-      seen[b.id] = true;
-      sel.appendChild(el('option', { value: b.id }, b.title));
+  function showSearch(q) {
+    setChip(null);
+    var words = fold(q).split(/\s+/).filter(Boolean);
+    var ids = lib.order.filter(function (id) {
+      var b = lib.books[id], hay = b.hay || (b.hay = fold(b.title + ' ' + b.author));
+      return words.every(function (w) { return hay.indexOf(w) >= 0; });
     });
-    sel.value = String(state.book.id);
-    renderPlan();
-  }
-  $('#planner-book').addEventListener('change', function (e) {
-    var b = books[e.target.value];
-    if (b) { autoplay = false; clearTimeout(timer); choose(b); }
-  });
-  $$('[data-pace]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      state.pace = Number(btn.getAttribute('data-pace'));
-      $$('[data-pace]').forEach(function (b) { b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'); });
-      renderPlan();
-    });
-  });
-
-  function renderPlan() {
-    var b = state.book, d = days(b, state.pace);
-    var finish = $('#finish'), sub = $('#finish-sub');
-    if (!finish) return;
-    finish.textContent = '';
-    if (!d) {
-      finish.appendChild(document.createTextNode('Pick a book to see when you’d finish it.'));
-      sub.textContent = '';
+    view.textContent = '';
+    var head = el('div', { class: 'view-head' });
+    head.appendChild(el('h1', null, 'Results for “' + q.trim() + '”'));
+    head.appendChild(el('p', null, plural(ids.length, 'book')));
+    view.appendChild(head);
+    if (!ids.length) {
+      view.appendChild(el('p', { class: 'empty' },
+        'No book or author matches “' + q.trim() + '”. Try a last name, like Austen or Tolstoy, or pick a genre above.'));
       return;
     }
-    var end = new Date();
-    end.setDate(end.getDate() + d);
-    var when = end.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: end.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined });
-    finish.appendChild(document.createTextNode('You’d finish '));
-    finish.appendChild(el('strong', null, b.title));
-    finish.appendChild(document.createTextNode(' in ' + d + (d === 1 ? ' morning.' : ' mornings.')));
-    sub.textContent = 'Start tomorrow and you’re done by ' + when + '. About ' +
-      Math.round(b.words / 1000) + ',000 words, ' + state.pace + ' minutes at a time.';
+    grid('Matching books', ids);
   }
 
-  // --- Sign-up (not live yet) -----------------------------------------------------
-  $$('[data-join]').forEach(function (form) {
-    form.addEventListener('submit', function (e) {
-      e.preventDefault();
-      var note = form.parentNode.querySelector('.note');
-      note.textContent = 'Thanks. Dripbook isn’t sending yet, so nothing was saved. Sign-up opens soon.';
+  function grid(label, ids) {
+    var list = el('ul', { class: 'grid', 'aria-label': label });
+    ids.forEach(function (id, i) { list.appendChild(card(id, { meta: true, eager: i < 12 })); });
+    view.appendChild(list);
+  }
+
+  // --- Routing: #genre/Romance and #book/1342 ---------------------------------------------
+  function route() {
+    var h = decodeURIComponent(location.hash.slice(1));
+    if (h.indexOf('book/') === 0) {
+      if (!view.querySelector('.row, .grid')) showHome();
+      var id = h.slice(5);
+      if (lib.books[id]) openBook(id);
+      return;
+    }
+    if (dialog.open) dialog.close();
+    if (h.indexOf('genre/') === 0 && lib.genres.some(function (g) { return g.name === h.slice(6); })) {
+      search.value = '';
+      showGenre(h.slice(6));
+    } else if (!search.value.trim()) {
+      showHome();
+    }
+    window.scrollTo(0, 0);
+  }
+  function go(hash) {
+    if (hash === '#') hash = '';
+    if (location.hash === hash) route(); else location.hash = hash;
+  }
+
+  // --- The book window ------------------------------------------------------------------
+  function openBook(id) {
+    var b = lib.books[id];
+    current = id;
+    var a = art(id, true);
+    a.id = 'dlg-art';
+    $('#dlg-art').replaceWith(a);
+    $('#dlg-title').textContent = b.title;
+    $('#dlg-by').textContent = b.author + (b.year ? ', ' + b.year : '');
+    var tags = $('#dlg-tags');
+    tags.textContent = '';
+    b.genres.concat(b.lists).forEach(function (g) {
+      var isGenre = b.genres.indexOf(g) >= 0;
+      var t = el('button', { type: 'button' }, g);
+      if (isGenre) t.dataset.genre = g; else t.disabled = true;
+      tags.appendChild(t);
     });
+    $('#dlg-blurb').textContent = b.blurb;
+    $('#dlg-blurb').hidden = !b.blurb;
+    $('#dlg-plan').hidden = !b.words;
+    renderDays();
+    $('#note').textContent = '';
+
+    var alike = $('#alike');
+    alike.textContent = '';
+    var g = b.genres[0];
+    if (g) {
+      var ids = lib.order.filter(function (o) { return o !== +id && lib.books[o].genres.indexOf(g) >= 0; }).slice(0, 14);
+      if (ids.length >= 3) alike.appendChild(row('More in ' + g, ids));
+    }
+    if (!dialog.open) dialog.showModal();
+    dialog.scrollTop = 0;
+  }
+  function renderDays() {
+    var b = lib.books[current], m = mornings(b, pace);
+    if (!m) return;
+    var p = $('#dlg-days');
+    p.innerHTML = '';
+    p.appendChild(document.createTextNode('Finish it in '));
+    p.appendChild(el('strong', null, plural(m, 'morning')));
+    p.appendChild(document.createTextNode(', ' + pace + ' minutes each.'));
+    $$('.pace button').forEach(function (btn) { btn.setAttribute('aria-pressed', String(+btn.dataset.pace === pace)); });
+  }
+
+  // --- Wiring ---------------------------------------------------------------------------
+  function buildChips() {
+    var nav = $('#genres');
+    var all = el('button', { type: 'button', class: 'chip', 'data-genre': '' }, 'All books');
+    nav.appendChild(all);
+    lib.genres.forEach(function (g) { nav.appendChild(el('button', { type: 'button', class: 'chip', 'data-genre': g.name }, g.name)); });
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-id], [data-genre], [data-close], [data-pace], [data-home]');
+    if (!t) return;
+    if (t.matches('[data-pace]')) { pace = +t.dataset.pace; renderDays(); return; }
+    if (t.matches('[data-close]')) { dialog.close(); return; }
+    if (t.matches('[data-home]')) { e.preventDefault(); search.value = ''; go(''); return; }
+    if (t.matches('[data-id]')) { go('#book/' + t.dataset.id); return; }
+    if (t.matches('[data-genre]')) {
+      search.value = '';
+      if (dialog.open) dialog.close();
+      go(t.dataset.genre ? '#genre/' + encodeURIComponent(t.dataset.genre) : '#');
+    }
   });
 
-  // --- Start ------------------------------------------------------------------------
-  showOpening(0);
-  choose(OPENINGS[0]);
-  loadLibrary();
-  cycle();
+  dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
+  dialog.addEventListener('close', function () {
+    if (location.hash.indexOf('#book/') === 0) history.replaceState(null, '', location.pathname + (lastView || ''));
+  });
+  var lastView = '';
+  window.addEventListener('hashchange', function () {
+    if (location.hash.indexOf('#book/') !== 0) lastView = location.hash;
+    route();
+  });
+
+  $('#join').addEventListener('submit', function (e) {
+    e.preventDefault();
+    $('#note').textContent = NOTE;
+  });
+
+  var timer;
+  search.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      var q = search.value.trim();
+      if (q.length >= 2) { if (location.hash) history.replaceState(null, '', location.pathname); showSearch(q); }
+      else if (!q) showHome();
+    }, 120);
+  });
+  $('#search-form').addEventListener('submit', function (e) { e.preventDefault(); search.blur(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === '/' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName) && !dialog.open) {
+      e.preventDefault(); search.focus();
+    }
+  });
+
+  var bar = $('#bar');
+  window.addEventListener('scroll', function () { bar.classList.toggle('scrolled', window.scrollY > 4); }, { passive: true });
+
+  fetch('library.json').then(function (r) { return r.json(); }).then(function (data) {
+    lib = data;
+    search.placeholder = 'Search ' + lib.total.toLocaleString('en') + ' books and authors';
+    buildChips();
+    if (location.hash.indexOf('#book/') !== 0) lastView = location.hash;
+    route();
+  }).catch(function () {
+    view.innerHTML = '<p class="empty">The library didn’t load. Refresh the page to try again.</p>';
+  });
 })();
