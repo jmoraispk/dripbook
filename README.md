@@ -5,7 +5,8 @@ Turn your ebook into a paid email course. Where it's heading: [ROADMAP.md](ROADM
 |---|---|
 | `site/` | The public landing page, plus `cuts.html`, the cut editor. Plain HTML and CSS, no build step. |
 | `scripts/site_check.py` | Pre-launch check for `site/`: broken links and unfilled settings. |
-| `vercel.json` | Hosting config: serves `site/` on Vercel. |
+| `vercel.json` | Hosting config: serves `site/` and `api/` on Vercel, plus the daily cron. |
+| `api/`, `drip/` | Sign-up and the daily email: cuts a book into parts and sends one each morning. See [docs/drip-pipeline.md](docs/drip-pipeline.md). |
 | `discovery/` | Customer discovery: finds ebook creators to pitch. Not part of the website. |
 | `converter/` | Turns an ebook PDF into daily lessons. |
 | `payments-spike/` | Test sale through Stripe Checkout, in a sandbox. Setup in `docs/email-delivery.md`. |

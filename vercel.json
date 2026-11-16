@@ -4,6 +4,12 @@
   "buildCommand": null,
   "outputDirectory": "site",
   "cleanUrls": true,
+  "functions": {
+    "api/*.py": { "includeFiles": "{drip/*.py,site/library.json}", "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/cron", "schedule": "0 6 * * *" }
+  ],
   "headers": [
     {
       "source": "/(.*)",

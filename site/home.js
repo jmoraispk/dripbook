@@ -4,7 +4,6 @@
 
   var WORDS_PER_MINUTE = 230;
   var COVER_COLORS = ['#7B2232', '#1F4A3B', '#1E3A66', '#8A6420', '#4A2D5C', '#1F5F68', '#5B3A24', '#33415C'];
-  var NOTE = "Thanks. Dripbook isn't sending yet, so nothing was saved. Sign-up opens soon.";
 
   var lib = null;            // library.json
   var current = null;        // the book in the dialog
@@ -203,7 +202,7 @@
     $('#dlg-blurb').hidden = !b.blurb;
     $('#dlg-plan').hidden = !b.words;
     renderDays();
-    $('#note').textContent = '';
+    note('');
 
     var alike = $('#alike');
     alike.textContent = '';
@@ -258,9 +257,30 @@
     route();
   });
 
+  // Sign-up: api/subscribe.py emails a confirmation link; part 1 follows the click.
+  function note(text, state) {
+    var n = $('#note');
+    n.textContent = text;
+    n.className = 'note' + (state ? ' ' + state : '');
+  }
   $('#join').addEventListener('submit', function (e) {
     e.preventDefault();
-    $('#note').textContent = NOTE;
+    var btn = $('#dlg-start'), book = current;
+    btn.disabled = true;
+    note('Sending…');
+    fetch('/api/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: $('#email').value, book: book, pace: pace })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (current !== book) return;
+        if (r.ok) note(data.message || 'Check your inbox for a link from Dripbook.', 'ok');
+        else note(data.error || 'That didn\'t work. Try again in a minute.', 'err');
+      });
+    }).catch(function () {
+      note("We couldn't reach Dripbook. Check your connection and try again.", 'err');
+    }).then(function () { btn.disabled = false; });
   });
 
   var timer;
