@@ -53,7 +53,10 @@
     opts = opts || {};
     var b = lib.books[id];
     var li = el('li');
-    if (opts.rank) li.appendChild(el('span', { class: 'num', 'aria-hidden': 'true' }, String(opts.rank)));
+    if (opts.rank) {
+      li.appendChild(el('span', { class: 'num', 'aria-hidden': 'true' }, String(opts.rank)));
+      if (opts.rank > 9) li.className = 'two';
+    }
     var btn = el('button', { type: 'button', class: 'book', 'data-id': id,
       'aria-label': (opts.rank ? 'Number ' + opts.rank + ': ' : '') + b.title + ' by ' + b.author });
     var a = art(id, opts.eager);
