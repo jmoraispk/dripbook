@@ -93,6 +93,14 @@ class SubscribeTest(unittest.TestCase):
         self.assertEqual((sub["status"], sub["pace"]), ("pending", 5))
         self.assertEqual(d.redis.ttl[f"sub:{token}"], app.PENDING_SECONDS)
 
+    def test_time_zone_is_saved_when_it_looks_valid(self):
+        d, clock, _ = make()
+        for tz, saved in [("Europe/Lisbon", "Europe/Lisbon"), ("America/Argentina/Buenos_Aires",
+                          "America/Argentina/Buenos_Aires"), ("UTC", "UTC"), ("<script>", ""), (None, "")]:
+            clock.now += 61
+            d.subscribe("a@b.co", "7", 5, "https://x", tz)
+            self.assertEqual(d.get_sub(token_from(d.mail.sent[-1], "confirm"))["tz"], saved)
+
     def test_rejects_bad_input(self):
         d, _, _ = make()
         for email, book, pace in [("nope", "7", 5), ("a@b.co", "999", 5), ("a@b.co", "7", 7), ("a@b.co", "7", None)]:
@@ -252,12 +260,13 @@ class WebTest(unittest.TestCase):
                 return e.code, e.read().decode()
 
     def test_sign_up_confirm_and_read_ahead(self):
-        status, body = self.call("subscribe", json_body={"email": "a@b.co", "book": "7", "pace": 5},
+        status, body = self.call("subscribe", json_body={"email": "a@b.co", "book": "7", "pace": 5, "tz": "Asia/Tokyo"},
                                  headers={"X-Forwarded-Host": "dripbook-git-x.vercel.app"})
         self.assertEqual(status, 200, body)
         self.assertEqual(json.loads(body)["status"], "sent")
         token = token_from(self.d.mail.sent[0], "confirm")
         self.assertIn("https://dripbook-git-x.vercel.app/api/confirm", self.d.mail.sent[0]["TextBody"])
+        self.assertEqual(self.d.get_sub(token)["tz"], "Asia/Tokyo")
 
         status, body = self.call("confirm", f"?t={token}")
         self.assertEqual(status, 200)

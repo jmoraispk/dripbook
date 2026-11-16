@@ -1,7 +1,7 @@
 """Sign-up, confirmation and daily sending for Dripbook drips. Standard library only.
 
 State lives in Upstash Redis (REST API), email goes through Postmark:
-  sub:{token}           JSON subscription: email, book, pace, status, sent, last_day, base
+  sub:{token}           JSON subscription: email, book, pace, tz, status, sent, last_day, base
   who:{email}:{book}    token of that reader's subscription to that book
   active                set of tokens that get a part every morning
   book:{id}             the clean text of a book (gzip, base64), fetched once from Gutenberg's mirror
@@ -34,6 +34,7 @@ PENDING_SECONDS = 7 * 24 * 3600
 RESEND_SECONDS = 60
 MIN_WORDS = 500          # below this the "book" is a stub (music, scans), not a drip
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+TIME_ZONE = re.compile(r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$")   # an IANA name like Europe/Lisbon
 
 
 class Problem(Exception):
@@ -145,7 +146,7 @@ class Drip:
         return book
 
     def parts(self, sub):
-        return cut.cut(self.book(sub["book"])["text"], sub["pace"])
+        return cut.cut(self.book(sub["book"])["text"], sub["pace"], sub["book"] not in cut.KEEP_FRONT_MATTER)
 
     # Sign-up
     def allowed(self, email):
@@ -153,7 +154,7 @@ class Drip:
         rule = [a.strip().lower() for a in self.env.get("ALLOWED_EMAILS", "").split(",") if a.strip()]
         return not rule or any(email == a or (a.startswith("@") and email.endswith(a)) for a in rule)
 
-    def subscribe(self, email, book_id, pace, base):
+    def subscribe(self, email, book_id, pace, base, tz=""):
         email = str(email or "").strip().lower()
         book_id = str(book_id or "").strip()
         if len(email) > 254 or not EMAIL.match(email):
@@ -180,7 +181,9 @@ class Drip:
         sub = old if old and old["status"] == "pending" else {
             "token": secrets.token_urlsafe(24), "email": email, "book": book_id,
             "status": "pending", "sent": 0, "last_day": "", "created": int(self.clock())}
-        sub.update(pace=pace, base=base, asked=int(self.clock()))
+        tz = str(tz or "")
+        sub.update(pace=pace, base=base, asked=int(self.clock()),
+                   tz=tz if len(tz) <= 64 and TIME_ZONE.match(tz) else "")
         self.save_sub(sub, expire=PENDING_SECONDS)
         reply = self.mail(confirm_email(sub, book, len(self.parts(sub))))
         if reply.get("ErrorCode", 1) != 0:

@@ -5,8 +5,9 @@
   python3 drip/cut.py public-domain/books/1342/pg1342.txt --show 3        # print part 3 as HTML
   python3 drip/cut.py --all public-domain/books                           # check every book
 
-clean() strips Gutenberg's header, footer and illustration tags. cut() splits the
-clean text into parts of about WORDS_PER_MINUTE x pace words, at paragraph breaks,
+clean() strips Gutenberg's header, footer and illustration tags. cut() skips short
+front matter (title page, contents, preface) so part 1 opens on chapter one, then splits the
+text into parts of about WORDS_PER_MINUTE x pace words, at paragraph breaks,
 starting a new part at a chapter heading when the current one is long enough.
 Cutting is deterministic, so part n of a book at a pace is always the same text.
 """
@@ -23,9 +24,23 @@ START = re.compile(r"^\*\*\* ?START OF (THE|THIS) PROJECT GUTENBERG.*$", re.M | 
 END = re.compile(r"^\*\*\* ?END OF (THE|THIS) PROJECT GUTENBERG.*$", re.M | re.I)
 ILLUSTRATION = re.compile(r"\[(Illustration|Frontispiece)[^\]]*\]", re.I)
 CREDIT = re.compile(r"^(Produced by|E-?text prepared by|Transcribed from|This e-?book was)", re.I)
+FIRST = re.compile(r"^((CHAPTER|BOOK|PART|LETTER|STAVE|CANTO|VOLUME)\s+(I|1|ONE|FIRST)\b"
+                   r"|(BOOK|PART|VOLUME)\s+THE\s+FIRST\b|I\.?$)", re.I)
+# Front matter (title page, contents, a preface) is skipped only when chapter one starts in the
+# first 5% of the book. Past that it's often the author's own prologue (The Turn of the Screw).
+FRONT_MATTER_SHARE = 0.05
+# Books whose front matter is the author's and worth reading: Darwin's introduction, Gulliver's letters.
+KEEP_FRONT_MATTER = {"2009", "17157"}
 HEADING = re.compile(
     r"^(CHAPTER|BOOK|PART|LETTER|STAVE|ACT|SCENE|CANTO|SECTION|VOLUME|EPILOGUE|PROLOGUE|PREFACE|INTRODUCTION)\b"
     r"|^[IVXLC]+\.?$", re.I)
+
+
+def caption_heading(m):
+    """An illustration tag goes, but a chapter heading printed inside it stays."""
+    lines = [ln.strip(" []") for ln in m.group(0).splitlines()]
+    heading = next((ln for ln in reversed(lines) if ln and HEADING.match(ln)), "")
+    return f"\n\n{heading}\n\n" if heading else ""
 
 
 def clean(raw):
@@ -33,8 +48,8 @@ def clean(raw):
     text = raw.replace("\r\n", "\n").lstrip("﻿")
     start, end = START.search(text), END.search(text)
     text = text[start.end() if start else 0:end.start() if end else len(text)]
-    text = ILLUSTRATION.sub("", text)
-    paras = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
+    text = ILLUSTRATION.sub(caption_heading, text)
+    paras = [p for p in re.split(r"\n\s*\n", text) if p.strip() and "project gutenberg" not in p.lower()]
     while paras and CREDIT.match(paras[0].strip()):
         paras.pop(0)
     return "\n\n".join(p.rstrip() for p in paras)
@@ -84,11 +99,37 @@ def split_long(block, size):
     return pieces
 
 
-def cut(text, pace):
-    """Split clean text into parts, each a list of (kind, text) blocks."""
+def story_start(blocks):
+    """Index of chapter one, so title pages, contents and prefaces are skipped; 0 if unsure.
+
+    Chapter one is the first heading like 'CHAPTER I' or 'Letter 1' followed by at least
+    150 words of text (entries in a table of contents are followed by the next entry).
+    A 'BOOK I' heading just before it is kept.
+    """
+    total, seen = sum(words(t) for _, t in blocks), 0
+    for i, (kind, text) in enumerate(blocks):
+        if seen > FRONT_MATTER_SHARE * total:
+            break
+        seen += words(text)
+        if kind != "h" or not FIRST.match(text):
+            continue
+        after, j = 0, i + 1
+        while j < len(blocks) and blocks[j][0] != "h" and after < 150:
+            after += words(blocks[j][1])
+            j += 1
+        if after >= 150:
+            while i > 0 and blocks[i - 1][0] == "h" and FIRST.match(blocks[i - 1][1]):
+                i -= 1
+            return i
+    return 0
+
+
+def cut(text, pace, skip_front=True):
+    """Split clean text into parts, each a list of (kind, text) blocks, from chapter one on."""
     target = WORDS_PER_MINUTE * pace
     blocks = []
-    for b in paragraphs(text):
+    found = paragraphs(text)
+    for b in found[story_start(found) if skip_front else 0:]:
         blocks.extend(split_long(b, target) if words(b[1]) > 1.5 * target else [b])
 
     parts, cur, n = [], [], 0
@@ -152,11 +193,13 @@ def main(argv=None):
 
     if args.all:
         for f in sorted(args.path.glob("*/pg*.txt")):
-            parts = cut(clean(f.read_text(encoding="utf-8", errors="replace")), args.pace)
+            parts = cut(clean(f.read_text(encoding="utf-8", errors="replace")), args.pace,
+                        f.parent.name not in KEEP_FRONT_MATTER)
             sizes = [part_words(x) for x in parts]
             print(f"{f.parent.name}\t{len(parts)} parts\tmin {min(sizes)}\tmax {max(sizes)}")
         return
-    parts = cut(clean(args.path.read_text(encoding="utf-8", errors="replace")), args.pace)
+    parts = cut(clean(args.path.read_text(encoding="utf-8", errors="replace")), args.pace,
+                args.path.parent.name not in KEEP_FRONT_MATTER)
     if args.show:
         print(to_html(parts[args.show - 1]))
         return

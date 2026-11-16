@@ -12,14 +12,14 @@
 
 | Step | Where |
 |---|---|
-| The dialog posts `{email, book, pace}` | `site/home.js` → `api/subscribe.py` |
+| The dialog posts `{email, book, pace, tz}` | `site/home.js` → `api/subscribe.py` |
 | Confirmation email, transactional stream `outbound`. Unconfirmed sign-ups expire after 7 days | `drip/app.py` `subscribe` |
 | The link opens a page with a button, so mail scanners that follow links can't confirm. Part 1 goes out on the click | `api/confirm.py` |
 | 06:00 UTC: each active reader who hasn't had a part today gets the next one, on stream `broadcast-1` | `api/cron.py`, `vercel.json` |
 | "Send me the next part now", the same button pattern | `api/next.py` |
 | Unsubscribe: Postmark's link (`{{{ pm:unsubscribe }}}`). When Postmark refuses a send (406), the subscription stops | `drip/app.py` `send_next` |
 
-The cutter (`drip/cut.py`) removes Gutenberg's header, footer, credits and illustration tags, then cuts at paragraph breaks into parts of 230 words × minutes. It starts a new part at a chapter heading once the current part is half full. Check a book with `python3 drip/cut.py public-domain/books/1342/pg1342.txt --pace 10`.
+The cutter (`drip/cut.py`) removes Gutenberg's header, footer, credits and illustration tags. Part 1 opens on chapter one when the title page, contents and preface before it are under 5% of the book (514 of 952 books). Longer openings are kept, because they're usually the author's own prologue, as in The Turn of the Screw. `KEEP_FRONT_MATTER` lists books whose short opening is worth reading too (Darwin's introduction, Gulliver's letters). The rest is cut at paragraph breaks into parts of 230 words × minutes, with a new part at a chapter heading once the current part is half full. Check a book with `python3 drip/cut.py public-domain/books/1342/pg1342.txt --pace 10`.
 
 ## Setup (once)
 
@@ -40,6 +40,7 @@ Tests: `python3 -m unittest discover -s drip`
 
 ## Not done yet
 
-- Part 1 can be front matter (a preface, a list of illustrations) before chapter 1.
-- One send time for everyone (06:00 UTC), and Postmark's unsubscribe stops every book for that address.
+- One send time for everyone (06:00 UTC). Each reader's time zone is saved at sign-up for when they can pick a time. That needs an hourly cron, which needs Vercel Pro.
+- Postmark's unsubscribe stops every book for that address.
+- Changing the cutter renumbers parts for readers already partway through a book.
 - No limit on sign-ups per IP beyond the one-minute resend guard.

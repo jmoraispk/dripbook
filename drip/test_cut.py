@@ -12,6 +12,8 @@ Author: Ann Writer\r
 \r
 Produced by Somebody and the Online Distributed Proofreading Team\r
 \r
+There are several editions of this ebook in the Project Gutenberg collection.\r
+\r
 [Illustration:\r
 \r
   A PICTURE\r
@@ -90,6 +92,36 @@ class CutTest(unittest.TestCase):
     def test_deterministic(self):
         text = clean(RAW.format(body="\n\n".join([prose(200)] * 30)))
         self.assertEqual(cut(text, 5), cut(text, 5))
+
+
+class FrontMatterTest(unittest.TestCase):
+    CONTENTS = "\n\n".join(["MY NOVEL", "by A. Writer", "CONTENTS", "CHAPTER I.", "CHAPTER II.", "PREFACE."])
+
+    def book(self, front_words=300, chapters=10):
+        body = [f"CHAPTER {c}.\n\n" + "\n\n".join([prose(200)] * 5) for c in ("I", "II", "III", "IV", "V",
+                "VI", "VII", "VIII", "IX", "X")[:chapters]]
+        return "\n\n".join([self.CONTENTS, prose(front_words)] + body)
+
+    def test_part_one_opens_on_chapter_one(self):
+        parts = cut(self.book(), 5)
+        self.assertEqual(parts[0][0], ("h", "CHAPTER I."))
+        self.assertEqual(sum(part_words(p) for p in parts), 10 * 1000 + 10 * 2)
+
+    def test_book_one_heading_is_kept(self):
+        text = self.book().replace("CHAPTER I.\n\n" + prose(200), "BOOK I.\n\nCHAPTER I.\n\n" + prose(200), 1)
+        self.assertEqual([t for _, t in cut(text, 5)[0][:2]], ["BOOK I.", "CHAPTER I."])
+
+    def test_long_front_matter_is_kept(self):
+        parts = cut(self.book(front_words=1500), 5)   # over 5% of the book: likely the author's prologue
+        self.assertEqual(parts[0][0], ("p", "MY NOVEL"))
+
+    def test_skip_front_false_keeps_everything(self):
+        self.assertEqual(cut(self.book(), 5, skip_front=False)[0][0], ("p", "MY NOVEL"))
+
+    def test_heading_inside_an_illustration_survives(self):
+        text = clean("*** START OF THE PROJECT GUTENBERG EBOOK X ***\n\n[Illustration: TITLE\n\n\nChapter I.]\n\n"
+                     "It was a truth.\n\n*** END OF THE PROJECT GUTENBERG EBOOK X ***")
+        self.assertEqual(text, "Chapter I.\n\nIt was a truth.")
 
 
 class HtmlTest(unittest.TestCase):

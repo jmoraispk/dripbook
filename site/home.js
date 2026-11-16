@@ -5,6 +5,18 @@
   var WORDS_PER_MINUTE = 230;
   var COVER_COLORS = ['#7B2232', '#1F4A3B', '#1E3A66', '#8A6420', '#4A2D5C', '#1F5F68', '#5B3A24', '#33415C'];
 
+  // The home page banner rotates daily through these. Opening lines checked against the Gutenberg texts.
+  var FEATURED = [
+    [1342, 'It is a truth universally acknowledged, that a single man in possession of a good fortune must be in want of a wife.'],
+    [2701, 'Call me Ishmael. Some years ago—never mind how long precisely—having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world.'],
+    [84, 'You will rejoice to hear that no disaster has accompanied the commencement of an enterprise which you have regarded with such evil forebodings.'],
+    [11, 'Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do.'],
+    [1661, 'To Sherlock Holmes she is always the woman.'],
+    [98, 'It was the best of times, it was the worst of times, it was the age of wisdom, it was the age of foolishness…'],
+    [64317, 'In my younger and more vulnerable years my father gave me some advice that I’ve been turning over in my mind ever since.'],
+    [1260, 'There was no possibility of taking a walk that day.']
+  ];
+
   var lib = null;            // library.json
   var current = null;        // the book in the dialog
   var pace = 10;
@@ -52,15 +64,12 @@
     opts = opts || {};
     var b = lib.books[id];
     var li = el('li');
-    if (opts.rank) {
-      li.appendChild(el('span', { class: 'num', 'aria-hidden': 'true' }, String(opts.rank)));
-      if (opts.rank > 9) li.className = 'two';
-    }
     var btn = el('button', { type: 'button', class: 'book', 'data-id': id,
       'aria-label': (opts.rank ? 'Number ' + opts.rank + ': ' : '') + b.title + ' by ' + b.author });
     var a = art(id, opts.eager);
     var m = mornings(b);
     if (m) a.appendChild(el('span', { class: 'len', 'aria-hidden': 'true' }, plural(m, 'morning')));
+    if (opts.rank) a.appendChild(el('span', { class: 'num', 'aria-hidden': 'true' }, String(opts.rank)));
     btn.appendChild(a);
     if (opts.meta) {
       var meta = el('div', { class: 'meta' }, b.title);
@@ -115,9 +124,46 @@
   function showHome() {
     setChip('');
     view.textContent = '';
+    var pick = banner();
+    if (pick) view.appendChild(pick);
     lib.rows.forEach(function (r, i) {
       view.appendChild(row(r.name, r.books, { ranked: r.ranked, genre: r.genre, eager: i < 2 }));
     });
+  }
+
+  // A featured book above the rows: its cover, its first sentence and a way in.
+  function banner() {
+    var day = Math.floor(Date.now() / 864e5);
+    var f = FEATURED.filter(function (x) { return lib.books[x[0]]; });
+    if (!f.length) return null;
+    var pick = f[day % f.length], id = pick[0], b = lib.books[id];
+    var sec = el('section', { class: 'bill', 'aria-labelledby': 'bill-title' });
+    if (b.cover) {
+      var bg = el('div', { class: 'bill-bg', 'aria-hidden': 'true' });
+      bg.style.backgroundImage = 'url(covers/' + id + '.webp)';
+      sec.appendChild(bg);
+    }
+    var inner = el('div', { class: 'bill-in' });
+    var text = el('div', { class: 'bill-text' });
+    var rank = lib.rows[0] && lib.rows[0].ranked ? lib.rows[0].books.indexOf(id) + 1 : 0;
+    text.appendChild(el('p', { class: 'kicker' }, rank ? 'No. ' + rank + ' on Dripbook' : "Today's pick"));
+    text.appendChild(el('h2', { id: 'bill-title' }, b.title));
+    var facts = [b.author + (b.year ? ', ' + b.year : '') + '.'];
+    if (b.genres[0]) facts.push(b.genres[0] + '.');
+    var m = mornings(b);
+    if (m) facts.push(plural(m, 'morning') + ' at 10 minutes a day.');
+    text.appendChild(el('p', { class: 'facts' }, facts.join(' ')));
+    text.appendChild(el('blockquote', null, pick[1]));
+    var acts = el('div', { class: 'acts' });
+    acts.appendChild(el('button', { type: 'button', class: 'btn', 'data-id': id }, 'Start reading free'));
+    if (b.genres[0]) acts.appendChild(el('button', { type: 'button', class: 'ghost', 'data-genre': b.genres[0] }, 'More ' + b.genres[0].toLowerCase()));
+    text.appendChild(acts);
+    inner.appendChild(text);
+    var cover = el('button', { type: 'button', class: 'bill-cover', 'data-id': id, 'aria-label': b.title + ' by ' + b.author });
+    cover.appendChild(art(id, true));
+    inner.appendChild(cover);
+    sec.appendChild(inner);
+    return sec;
   }
 
   function showGenre(name) {
@@ -258,6 +304,9 @@
   });
 
   // Sign-up: api/subscribe.py emails a confirmation link; part 1 follows the click.
+  function timeZone() {   // saved for when readers can pick their delivery time
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (err) { return ''; }
+  }
   function note(text, state) {
     var n = $('#note');
     n.textContent = text;
@@ -271,7 +320,7 @@
     fetch('/api/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: $('#email').value, book: book, pace: pace })
+      body: JSON.stringify({ email: $('#email').value, book: book, pace: pace, tz: timeZone() })
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
         if (current !== book) return;

@@ -90,7 +90,7 @@ def drip():
 # --- Endpoints --------------------------------------------------------------------------
 def subscribe(req):
     data = req.data()
-    out = drip().subscribe(data.get("email"), data.get("book"), data.get("pace"), req.base())
+    out = drip().subscribe(data.get("email"), data.get("book"), data.get("pace"), req.base(), data.get("tz"))
     return 200, JSON, json.dumps(out)
 
 
