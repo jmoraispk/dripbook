@@ -5,4 +5,6 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "drip"))
 import web  # noqa: E402
 
-handler = web.handler_for(get=web.next_get, post=web.next_post)
+# Vercel only deploys a .py file as a function if it declares `class handler`.
+class handler(web.handler_for(get=web.next_get, post=web.next_post)):
+    pass

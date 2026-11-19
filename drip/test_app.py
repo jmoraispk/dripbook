@@ -310,6 +310,8 @@ class EntryPointsTest(unittest.TestCase):
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             self.assertTrue(issubclass(mod.handler, BaseHTTPRequestHandler), name)
+            with open(os.path.join(api, f"{name}.py")) as f:   # Vercel's build skips files without it
+                self.assertRegex(f.read(), r"(?m)^class handler\(", name)
 
 
 class LibraryTest(unittest.TestCase):
