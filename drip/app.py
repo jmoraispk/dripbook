@@ -8,11 +8,20 @@ State lives in Upstash Redis (REST API), email goes through Postmark:
                         the HTML edition, or the plain text when the HTML is missing or garbled
   own:{id}              a reader's own PDF as the parts they cut in the editor (JSON, gzip, base64);
                         own-books tracks when each expires (30 days after its drip ends)
+  own-pics:{id}         that book's pictures: part number -> JSON list of files in Vercel Blob
+  own-upload:{id}       while the editor uploads the pictures: the key it was given (an hour)
   book-requests         list of book requests, one JSON entry each
 
 A subscription is 'pending' until its link is confirmed (kept 7 days), then 'active'
 until the last part ('done') or until Postmark says the reader unsubscribed ('stopped').
 Parts are cut on the fly from the cached blocks (drip/cut.py is deterministic and fast).
+
+Pictures in a reader's own PDF live in a private Vercel Blob store, one file per part (or a few
+for a part with many pictures). They go inside each email as inline attachments, so they show
+in the text, need nothing fetched when the reader opens the email, and stay in their inbox
+after we delete the book. Blob deletes the files by itself: each is written with a timer
+(ttl) that follows the book's: 8 days while unconfirmed, the drip's length plus 60 days once
+it starts, and 31 days once it ends.
 """
 import base64
 import gzip
@@ -27,6 +36,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode, urlsplit
 
 import cut
 import gutenberg_html
@@ -59,7 +69,17 @@ OWN_KEEP_SECONDS = 30 * 24 * 3600
 MAX_OWN_BOOKS = 200               # books stored at once: a ceiling for the free database
 MAX_OWN_BYTES = 900_000           # compressed; Upstash's free plan takes requests up to 1 MB
 MAX_OWN_LESSONS = 1000
-OWN_KINDS = {"h2", "h3", "p", "quote", "verse", "note", "pg"}
+OWN_KINDS = {"h2", "h3", "p", "quote", "verse", "note", "pg", "img"}
+# Pictures: ("img", "i12 480") is picture i12, shown 480 px wide; its file comes with the part.
+BLOB_API = "https://vercel.com/api/blob"
+BLOB_API_VERSION = "13"           # what @vercel/blob 2.9 sends
+OWN_PICS = "own-pics:"
+OWN_UPLOAD = "own-upload:"
+UPLOAD_SECONDS = 3600
+MAX_PICTURE_BYTES = 25_000_000    # a book's pictures, all together
+MAX_PART_PICTURE_BYTES = 7_000_000   # one email's; Postmark takes 10 MB with base64 and text
+PICTURE_TYPES = {"image/jpeg": "jpg", "image/png": "png"}
+PICTURE = re.compile(r"^(i\d{1,5}) (\d{1,4})$")
 INLINE_TAG = re.compile(r"(</?(?:em|strong|sup|sub)>)")
 
 
@@ -106,6 +126,37 @@ class Postmark:
                 return json.load(e)
 
 
+class Blob:
+    """A private Vercel Blob store over its REST API: the same calls @vercel/blob makes."""
+    def __init__(self, token):
+        self.token = token
+
+    def _api(self, path, data, headers, method="POST"):
+        req = urllib.request.Request(BLOB_API + path, data=data, method=method, headers={
+            "authorization": f"Bearer {self.token}", "x-api-version": BLOB_API_VERSION,
+            "x-vercel-blob-store-id": self.token.split("_")[3] if self.token.count("_") >= 4 else "", **headers})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.load(resp)
+
+    def put(self, pathname, data, content_type, ttl_days):
+        """Store data at pathname, replacing what's there; returns the file's URL."""
+        return self._api("/?" + urlencode({"pathname": pathname}), data, {
+            "x-vercel-blob-access": "private", "x-content-type": content_type, "x-add-random-suffix": "0",
+            "x-allow-overwrite": "1", "x-ttl-days": str(ttl_days)}, method="PUT")["url"]
+
+    def get(self, url):
+        if not (urlsplit(url).hostname or "").endswith(".blob.vercel-storage.com"):
+            raise ValueError("not a Vercel Blob URL")   # never send the token anywhere else
+        req = urllib.request.Request(url, headers={"authorization": f"Bearer {self.token}"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.read()
+
+    def set_ttl(self, urls, days):
+        """Delete these files `days` from now (1 to 730)."""
+        self._api("/set-ttl", json.dumps({"urls": urls, "ttlDays": days}).encode(),
+                  {"content-type": "application/json"})
+
+
 def fetch_gutenberg(book_id, url=MIRROR):
     req = urllib.request.Request(url.format(id=book_id), headers={"User-Agent": "dripbook/0.1"})
     with urllib.request.urlopen(req, timeout=30) as resp:
@@ -143,8 +194,8 @@ def today():
 # --- The drip ---------------------------------------------------------------------------
 class Drip:
     def __init__(self, redis, mail, env=None, fetch=fetch_gutenberg, library=None, clock=time.time, day=today,
-                 fetch_html=fetch_gutenberg_html):
-        self.redis, self.mail, self.fetch, self.fetch_html = redis, mail, fetch, fetch_html
+                 fetch_html=fetch_gutenberg_html, blob=None):
+        self.redis, self.mail, self.fetch, self.fetch_html, self.blob = redis, mail, fetch, fetch_html, blob
         self.env = os.environ if env is None else env
         self.library = load_library() if library is None else library
         self.clock, self.day = clock, day
@@ -160,7 +211,8 @@ class Drip:
         key = env.get("POSTMARK_SERVER_TOKEN")
         if not (url and token and (key or not mail)):
             raise Problem(503, "Sign-up isn't set up on this server yet.")
-        return cls(Redis(url, token), Postmark(key) if key else None)
+        blob = env.get("BLOB_READ_WRITE_TOKEN")
+        return cls(Redis(url, token), Postmark(key) if key else None, blob=Blob(blob) if blob else None)
 
     # Storage
     def get_sub(self, token):
@@ -266,7 +318,8 @@ class Drip:
         sub["status"] = "active"
         sub["confirmed"] = int(self.clock())
         self.save_sub(sub)
-        self.keep_own(sub["book"])
+        if sub["book"].startswith(OWN):
+            self.keep_own(sub["book"], n_parts=len(self.parts(sub)))
         self.redis("SADD", "active", sub["token"])
         return sub, self.send_next(sub)
 
@@ -296,7 +349,10 @@ class Drip:
 
     # A reader's own PDF
     def subscribe_own(self, email, title, lessons, base, tz="", rights=False):
-        """Start a drip of lessons cut in the editor. Same confirmation and mornings as a library book."""
+        """Start a drip of lessons cut in the editor. Same confirmation and mornings as a library book.
+
+        When the lessons have pictures, no email goes yet: the reply is {'status': 'upload', 'book',
+        'key'}, the editor sends each part's pictures to add_pictures(), then calls pictures_done()."""
         email = str(email or "").strip().lower()
         if len(email) > 254 or not EMAIL.match(email):
             raise Problem(400, "That email address doesn't look right.")
@@ -305,7 +361,7 @@ class Drip:
         if not self.allowed(email):
             raise Problem(403, "Dripbook isn't open to everyone yet. Sign-up opens soon.")
         title = " ".join(str(title or "").split())[:200] or "Your book"
-        parts = clean_lessons(lessons)
+        parts = clean_lessons(lessons, pictures=self.blob is not None)
         packed = pack({"title": title, "parts": parts})
         if len(packed) > MAX_OWN_BYTES:
             raise Problem(413, "This book is too long for us to send yet. Try a shorter PDF, or skip parts you don't need.")
@@ -323,21 +379,119 @@ class Drip:
                "status": "pending", "sent": 0, "last_day": "", "created": now, "pace": 0, "base": base,
                "asked": now, "tz": tz if len(tz) <= 64 and TIME_ZONE.match(tz) else ""}
         self.save_sub(sub, expire=PENDING_SECONDS)
-        reply = self.mail(confirm_email(sub, self.book(book_id), len(parts)))
+        if any(k == "img" for part in parts for k, _ in part):
+            key = secrets.token_urlsafe(24)
+            self.redis("SET", OWN_UPLOAD + book_id[len(OWN):], json.dumps({"key": key, "token": sub["token"], "bytes": 0}),
+                       "EX", UPLOAD_SECONDS)
+            return {"status": "upload", "book": book_id, "key": key}
+        return self.ask_own(sub)
+
+    def ask_own(self, sub):
+        """The confirmation email for a reader's own book."""
+        reply = self.mail(confirm_email(sub, self.book(sub["book"]), len(self.parts(sub))))
         if reply.get("ErrorCode", 1) != 0:
             raise Problem(502, "We couldn't send the confirmation email. Try again in a minute.")
-        return {"status": "sent", "message": f"Almost there. We sent a link to {email}: click it to get lesson 1."}
+        return {"status": "sent", "message": f"Almost there. We sent a link to {sub['email']}: click it to get lesson 1."}
 
-    def keep_own(self, book_id, seconds=None):
-        """Keep a reader's own book while their drip runs, or for `seconds` more."""
+    def upload(self, book_id, key):
+        """The upload record for this book, if key is the one subscribe_own gave out."""
+        book_id = str(book_id or "")
+        raw = self.redis("GET", OWN_UPLOAD + book_id[len(OWN):]) if book_id.startswith(OWN) else None
+        record = json.loads(raw) if raw else None
+        if not record or not secrets.compare_digest(record["key"], str(key or "")):
+            raise Problem(403, "This upload has expired. Start again from the editor.")
+        return book_id, record
+
+    def add_pictures(self, book_id, key, part, images):
+        """Store one part's pictures, {name: {'type', 'data' (base64)}}, as one file in Blob."""
+        book_id, record = self.upload(book_id, key)
+        parts = self.book(book_id)["parts"]
+        try:
+            part = int(part)
+        except (TypeError, ValueError):
+            part = 0
+        if not 1 <= part <= len(parts) or not isinstance(images, dict) or not images:
+            raise Problem(400, "These pictures didn't come through. Try again.")
+        wanted = {PICTURE.match(t).group(1) for k, t in parts[part - 1] if k == "img"}
+        size, clean = 0, {}
+        for name, image in images.items():
+            if name not in wanted or not isinstance(image, dict) or image.get("type") not in PICTURE_TYPES:
+                raise Problem(400, "These pictures didn't come through. Try again.")
+            try:
+                size += len(base64.b64decode(str(image.get("data", "")), validate=True))
+            except ValueError:
+                raise Problem(400, "These pictures didn't come through. Try again.")
+            clean[name] = {"type": image["type"], "data": image["data"]}
+        sizes = record.setdefault("parts", {})
+        if record["bytes"] + size > MAX_PICTURE_BYTES or sizes.get(str(part), 0) + size > MAX_PART_PICTURE_BYTES:
+            raise Problem(413, "These pictures are too big for us to send. They'll show their captions instead.")
+        pics = OWN_PICS + book_id[len(OWN):]
+        files = json.loads(self.redis("HGET", pics, part) or "[]")
+        try:
+            url = self.blob.put(f"own/{book_id[len(OWN):]}/{part}-{len(files)}.json",
+                                json.dumps(clean, separators=(",", ":")).encode(), "application/json",
+                                ttl_days=PENDING_SECONDS // 86400 + 1)
+        except (OSError, ValueError, KeyError) as e:
+            print(f"Blob put failed: {e!r}")
+            raise Problem(502, "We couldn't save these pictures just now.")
+        self.redis("HSET", pics, part, json.dumps(files + [url]))
+        self.redis("EXPIRE", pics, PENDING_SECONDS)
+        record["bytes"] += size
+        sizes[str(part)] = sizes.get(str(part), 0) + size
+        self.redis("SET", OWN_UPLOAD + book_id[len(OWN):], json.dumps(record), "EX", UPLOAD_SECONDS)
+        return {"status": "saved"}
+
+    def pictures_done(self, book_id, key):
+        """Every picture is in (or the editor gave up on some): send the confirmation email."""
+        book_id, record = self.upload(book_id, key)
+        sub = self.get_sub(record["token"])
+        if not sub:
+            raise Problem(403, "This upload has expired. Start again from the editor.")
+        out = self.ask_own(sub)
+        self.redis("DEL", OWN_UPLOAD + book_id[len(OWN):])
+        return out
+
+    def picture_files(self, book_id, part=None):
+        """The Blob URLs of a book's pictures: one part's, or all of them."""
+        pics = OWN_PICS + book_id[len(OWN):]
+        if part is not None:
+            return json.loads(self.redis("HGET", pics, part) or "[]")
+        return [u for v in (self.redis("HGETALL", pics) or [])[1::2] for u in json.loads(v)]
+
+    def pictures(self, book_id, part):
+        """{name: (content type, base64)} for one part, read from Blob; {} if they can't be read."""
+        out = {}
+        if not self.blob:
+            return out
+        for url in self.picture_files(book_id, part):
+            try:
+                for name, image in json.loads(self.blob.get(url)).items():
+                    out[name] = (image["type"], image["data"])
+            except (OSError, ValueError, KeyError) as e:
+                print(f"Blob get failed for part {part}: {e!r}")   # the email goes without them
+        return out
+
+    def keep_own(self, book_id, seconds=None, n_parts=0):
+        """Keep a reader's own book, and its pictures, while their drip runs, or for `seconds` more."""
         if not book_id.startswith(OWN):
             return
+        pics = OWN_PICS + book_id[len(OWN):]
         if seconds is None:
             self.redis("PERSIST", book_id)
+            self.redis("PERSIST", pics)
             self.redis("ZADD", OWN_BOOKS, "+inf", book_id)
+            days = min(730, n_parts + 60)   # one part a day at the slowest, with room to spare
         else:
             self.redis("EXPIRE", book_id, seconds)
+            self.redis("EXPIRE", pics, seconds)
             self.redis("ZADD", OWN_BOOKS, int(self.clock()) + seconds, book_id)
+            days = seconds // 86400 + 1
+        files = self.picture_files(book_id) if self.blob else []
+        if files:
+            try:
+                self.blob.set_ttl(files, days)
+            except (OSError, ValueError) as e:
+                print(f"Blob set-ttl failed for {book_id}: {e!r}")
 
     # Sending
     def send_next(self, sub):
@@ -348,7 +502,9 @@ class Drip:
         n = sub["sent"] + 1
         if n > len(parts):
             return self.finish(sub, "done")
-        reply = self.mail(part_email(sub, book, parts, n, self.broadcast))
+        pictures = (self.pictures(sub["book"], n) if book.get("own") and any(k == "img" for k, _ in parts[n - 1])
+                    else {})
+        reply = self.mail(part_email(sub, book, parts, n, self.broadcast, pictures))
         code = reply.get("ErrorCode", 1)
         if code == 406:   # Postmark: the reader unsubscribed, bounced or complained
             return self.finish(sub, "stopped")
@@ -410,14 +566,15 @@ def safe_inline(text):
     return gutenberg_html.close_tags(out)
 
 
-def clean_lessons(lessons):
-    """The editor's lessons, [[[kind, html], ...], ...], checked and made safe for an email."""
+def clean_lessons(lessons, pictures=True):
+    """The editor's lessons, [[[kind, html], ...], ...], checked and made safe for an email.
+    Pictures are dropped (their captions stay) when there's nowhere to keep them."""
     bad = Problem(400, "These lessons didn't come through. Reload the editor and try again.")
     if not isinstance(lessons, list) or not lessons:
         raise bad
     if len(lessons) > MAX_OWN_LESSONS:
         raise Problem(400, f"That's more than {MAX_OWN_LESSONS} lessons. Merge some and try again.")
-    parts = []
+    parts, seen = [], set()
     for lesson in lessons:
         if not isinstance(lesson, list):
             raise bad
@@ -427,7 +584,15 @@ def clean_lessons(lessons):
                 raise bad
             kind, text = block
             kind = kind if kind in OWN_KINDS else "p"
-            text = re.sub(r"[^0-9A-Za-z]", "", text)[:12] if kind == "pg" else safe_inline(text).strip()
+            if kind == "img":
+                m = PICTURE.match(text)
+                if not (pictures and m and 0 < int(m.group(2)) and m.group(1) not in seen):
+                    continue
+                seen.add(m.group(1))
+            elif kind == "pg":
+                text = re.sub(r"[^0-9A-Za-z]", "", text)[:12]
+            else:
+                text = safe_inline(text).strip()
             if text:
                 part.append((kind, text))
         if any(k != "pg" for k, _ in part):
@@ -541,7 +706,20 @@ def confirm_email(sub, book, n_parts):
             "TrackOpens": False, "TrackLinks": "None"}
 
 
-def part_email(sub, book, parts, n, stream):
+def picture_html(spec, pictures):
+    """An inline picture: <img> pointing at the attachment with the same Content-ID."""
+    m = PICTURE.match(spec)
+    if not m or m.group(1) not in pictures:
+        return ""
+    name, width = m.group(1), min(int(m.group(2)), 560)
+    cid = f"{name}.{PICTURE_TYPES[pictures[name][0]]}"
+    return (f'<p style="margin:0 0 1em;text-align:center"><img src="cid:{cid}" width="{width}" alt="" '
+            f'style="display:block;margin:0 auto;width:100%;max-width:{width}px;height:auto;border:0"></p>')
+
+
+def part_email(sub, book, parts, n, stream, pictures=None):
+    """One part. pictures, {name: (type, base64)}, go in as inline attachments."""
+    pictures = pictures or {}
     e = html.escape
     title, part, total = book["title"], parts[n - 1], len(parts)
     w = where(book, parts, n)
@@ -556,14 +734,21 @@ def part_email(sub, book, parts, n, stream):
                       f'<a href="{e(sub["base"])}/" style="color:#666">Pick your next book</a>.</p>')
         after_text = f"That's the end of {title}. Pick your next book: {sub['base']}/"
     inner = (header_html(w)
-             + cut.to_html(part, BODY)
+             + cut.to_html(part, {**BODY, "img": lambda spec: picture_html(spec, pictures)})
              + '<hr style="border:0;border-top:1px solid #ddd;margin:32px 0 16px">'
              + after_html
              + f'<p style="{SMALL}">{source} '
                f'<a href="{{{{{{ pm:unsubscribe }}}}}}" style="color:#666">Unsubscribe</a></p>')
     text = (f"{header_text(w)}\n\n{cut.to_text(part)}\n\n---\n{after_text}\n\n"
             "Unsubscribe: {{{ pm:unsubscribe }}}")
-    return {"From": SENDER, "To": sub["email"], "Subject": f"{title}, part {n} of {total}",
-            "HtmlBody": page(inner), "TextBody": text, "MessageStream": stream, "Tag": "part",
-            "TrackOpens": False, "TrackLinks": "None",
-            "Metadata": {"book": sub["book"], "part": str(n)}}
+    message = {"From": SENDER, "To": sub["email"], "Subject": f"{title}, part {n} of {total}",
+               "HtmlBody": page(inner), "TextBody": text, "MessageStream": stream, "Tag": "part",
+               "TrackOpens": False, "TrackLinks": "None",
+               "Metadata": {"book": sub["book"], "part": str(n)}}
+    shown = [PICTURE.match(t).group(1) for k, t in part if k == "img" and PICTURE.match(t)]
+    attachments = [{"Name": f"{name}.{PICTURE_TYPES[pictures[name][0]]}", "Content": pictures[name][1],
+                    "ContentType": pictures[name][0], "ContentID": f"cid:{name}.{PICTURE_TYPES[pictures[name][0]]}"}
+                   for name in shown if name in pictures]
+    if attachments:
+        message["Attachments"] = attachments
+    return message

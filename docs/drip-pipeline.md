@@ -21,6 +21,7 @@
 | "Send me the next part now", the same pattern | `api/next.py` |
 | Book requests from How it works: every request is its own entry in the `book-requests` list; only an identical one from the same IP within 10 minutes is dropped. No email is sent | `site/how.js` → `api/request.py` |
 | Your own PDF: the editor (`/cuts?for=me`) posts each lesson's text as blocks. It's stored as `own:{id}` and sent like any book: same confirmation, mornings and header. Kept until 30 days after the drip ends; at most 200 at once, 900 KB compressed each | `site/cuts.html` → `api/own.py` |
+| Its pictures: each figure is cut from the page in the browser (JPEG or PNG, up to 1200 px wide) and sent one lesson at a time to a private Vercel Blob store, then the confirmation email goes. Each part's email carries its pictures as inline attachments (`cid:`), placed in the text. Blob deletes them by itself: 8 days if unconfirmed, then the drip's length plus 60 days, then 31 days once it ends. At most 25 MB a book, 7 MB an email. Without `BLOB_READ_WRITE_TOKEN`, drips go out with captions only | `site/cuts.html` → `api/pictures.py` |
 | Unsubscribe: Postmark's link (`{{{ pm:unsubscribe }}}`). When Postmark refuses a send (406), the subscription stops | `drip/app.py` `send_next` |
 
 The cutter (`drip/cut.py`) works on blocks with Gutenberg's header, footer, credits, contents and illustrations already removed. Part 1 opens on chapter one when the title page, contents and preface before it are under 5% of the book (514 of 952 books). Longer openings are kept, because they're usually the author's own prologue, as in The Turn of the Screw. `KEEP_FRONT_MATTER` lists books whose short opening is worth reading too (Darwin's introduction, Gulliver's letters). The rest is cut at paragraph breaks into parts of 230 words × minutes, with a new part at a chapter heading once the current part is half full. Check a book with `python3 drip/cut.py public-domain/books/1342/pg1342.txt --pace 10`.
@@ -31,6 +32,7 @@ The cutter (`drip/cut.py`) works on blocks with Gutenberg's header, footer, cred
 2. **Settings → Environment Variables:**
    - `POSTMARK_SERVER_TOKEN`: Postmark → Servers → Dripbook → API Tokens. Mark it Sensitive.
    - `CRON_SECRET`: any long random string (`openssl rand -hex 32`). Vercel sends it with each cron call.
+   - `BLOB_READ_WRITE_TOKEN`: added by **Storage → Create Database → Blob**, with access set to **Private**. Without it, own-PDF drips have no pictures.
    - `ALLOWED_EMAILS`: until launch, the only addresses that can sign up, e.g. `you@x.com, @dripbook.ai`. Remove it to open sign-up.
 3. Redeploy. Until steps 1 and 2 are done, the form answers "Sign-up isn't set up on this server yet."
 

@@ -29,7 +29,7 @@
   <h2>What we keep</h2>
   <p><strong>When you start a drip:</strong> your email address, the book, your pace, the time zone your browser reports, when you signed up and confirmed, and how many parts we've sent. If you don't confirm within 7 days, we delete the sign-up.</p>
   <p><strong>When you ask for a book:</strong> the title, the author, your email address, whether you wrote it, and when you asked. We use it to see which books readers want, to ask their authors or publishers, and to tell you when one arrives. To drop accidental double requests, we keep a one-way fingerprint of your IP address with the request for 10 minutes. We never store the address itself.</p>
-  <p><strong>When you drip your own PDF:</strong> the PDF opens in your browser and is not uploaded. When you press Email it to me, we receive the text of your lessons (no pictures), the title and your email address. We use it only to send your lessons. Nobody reads it unless you ask us for help, nothing is shared or published, and it is never used to train AI. We delete it 30 days after your last lesson, or after 7 days if you never confirm.</p>
+  <p><strong>When you drip your own PDF:</strong> the PDF opens in your browser and is not uploaded. When you press Email it to me, we receive the text of your lessons, the pictures in them (cut from the pages in your browser), the title and your email address. We use them only to send your lessons; the pictures travel inside each email, so they stay in your inbox and nothing loads from us when you open it. Nobody reads them unless you ask us for help, nothing is shared or published, and they are never used to train AI. We delete them 30 days after your last lesson, or after 7 to 8 days if you never confirm.</p>
   <p><strong>When you send us your book as an author:</strong> your name, email address, PDF and saved cuts. We use them to build your course and to talk to you about it, and we publish nothing without your go-ahead.</p>
 
   <h2>What you confirm</h2>
@@ -49,7 +49,7 @@
 
   <h2>Who else handles it</h2>
   <ul>
-    <li><strong>Vercel</strong> hosts the site and runs sign-ups. Its logs see your IP address.</li>
+    <li><strong>Vercel</strong> hosts the site and runs sign-ups. Its logs see your IP address. Its private file storage (Vercel Blob) holds the pictures from your own PDF until we delete them.</li>
     <li><strong>Upstash</strong> holds our database: sign-ups, requests and your own lessons.</li>
     <li><strong>Postmark</strong> sends our emails and keeps a record of each one for up to 45 days.</li>
     <li><strong>Dropbox</strong> receives author uploads until we move them.</li>

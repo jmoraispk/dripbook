@@ -115,6 +115,17 @@ def subscribe_own(req):
     return 200, JSON, json.dumps(out)
 
 
+def pictures(req):
+    """The editor sends a part's pictures, {book, key, part, images}, then {book, key, done: true}."""
+    data = req.data()
+    d = drip()
+    if data.get("done") is True:
+        out = d.pictures_done(data.get("book"), data.get("key"))
+    else:
+        out = d.add_pictures(data.get("book"), data.get("key"), data.get("part"), data.get("images"))
+    return 200, JSON, json.dumps(out)
+
+
 def confirm_get(req):
     return 200, HTML, page("Starting your drip", "One moment. If nothing happens, press the button.",
                            "Start my drip", req.query.get("t", ""), auto=True)

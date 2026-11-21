@@ -2,6 +2,7 @@
 
 Run: python3 -m unittest discover -s drip
 """
+import base64
 import json
 import os
 import threading
@@ -59,8 +60,12 @@ class FakeRedis:
         if cmd == "LRANGE":
             return list(self.data.get(args[0], []))
         if cmd == "HSET":
-            self.data.setdefault(args[0], {})[args[1]] = args[2]
+            self.data.setdefault(args[0], {})[str(args[1])] = args[2]
             return 1
+        if cmd == "HGET":
+            return self.data.get(args[0], {}).get(str(args[1]))
+        if cmd == "DEL":
+            return int(self.data.pop(args[0], None) is not None)
         if cmd == "HGETALL":
             return [x for kv in self.data.get(args[0], {}).items() for x in kv]
         if cmd == "ZADD":
@@ -88,6 +93,28 @@ class FakeMail:
     def __call__(self, message):
         self.sent.append(message)
         return self.reply
+
+
+class FakeBlob:
+    """A private Vercel Blob store in memory; fail makes every call raise."""
+    def __init__(self):
+        self.files, self.ttl, self.fail = {}, {}, False
+
+    def put(self, pathname, data, content_type, ttl_days):
+        if self.fail:
+            raise OSError("blob down")
+        url = f"https://store.private.blob.vercel-storage.com/{pathname}"
+        self.files[url], self.ttl[url] = data, ttl_days
+        return url
+
+    def get(self, url):
+        if self.fail:
+            raise OSError("blob down")
+        return self.files[url]
+
+    def set_ttl(self, urls, days):
+        for u in urls:
+            self.ttl[u] = days
 
 
 class Clock:
@@ -323,6 +350,88 @@ class OwnTest(unittest.TestCase):
                 self.start(d, email="b@x.com")
         self.assertEqual(e.exception.status, 503)
 
+    def picture_lessons(self):
+        out = lessons()
+        out[0][2:2] = [["img", "i0 480"], ["note", "Figure 1: a map"], ["img", "i1 9999"]]
+        out[2].append(["img", "i2 300"])
+        return out
+
+    def test_pictures_go_inline(self):
+        d, clock, _ = make()
+        d.blob = FakeBlob()
+        png = base64.b64encode(b"\x89PNG fake").decode()
+        out = self.start(d, lessons=self.picture_lessons())
+        self.assertEqual(out["status"], "upload")
+        self.assertEqual(d.mail.sent, [], "no email until the pictures are in")
+        book, key = out["book"], out["key"]
+        for bad, status in ((dict(key="wrong"), 403), (dict(part=2), 400), (dict(part=9), 400),
+                            (dict(images={"i9": {"type": "image/png", "data": png}}), 400),
+                            (dict(images={"i0": {"type": "image/gif", "data": png}}), 400),
+                            (dict(images={"i0": {"type": "image/png", "data": "not base64!"}}), 400)):
+            args = dict(key=key, part=1, images={"i0": {"type": "image/png", "data": png}})
+            args.update(bad)
+            with self.assertRaises(Problem, msg=bad) as e:
+                d.add_pictures(book, args["key"], args["part"], args["images"])
+            self.assertEqual(e.exception.status, status, bad)
+        d.add_pictures(book, key, 1, {"i0": {"type": "image/png", "data": png}})
+        d.add_pictures(book, key, 1, {"i1": {"type": "image/jpeg", "data": png}})
+        self.assertEqual(sorted(d.blob.ttl.values()), [8, 8], "unconfirmed: gone in 8 days")
+        self.assertEqual(len(d.picture_files(book, 1)), 2, "a second request makes a second file")
+
+        out = d.pictures_done(book, key)
+        self.assertEqual(out["status"], "sent")
+        with self.assertRaises(Problem):
+            d.pictures_done(book, key)   # the key is used up
+        d.confirm(token_from(d.mail.sent[0], "confirm"))
+        self.assertEqual(set(d.blob.ttl.values()), {3 + 60}, "kept for the drip, with room to spare")
+        first = d.mail.sent[1]
+        self.assertEqual([a["ContentID"] for a in first["Attachments"]], ["cid:i0.png", "cid:i1.jpg"])
+        self.assertEqual(first["Attachments"][0]["Content"], png)
+        html_body = first["HtmlBody"]
+        self.assertLess(html_body.index('src="cid:i0.png" width="480"'), html_body.index("Figure 1: a map"))
+        self.assertIn('src="cid:i1.jpg" width="560"', html_body, "never wider than the email")
+        self.assertNotIn("i0", first["TextBody"])
+
+        clock.date = "2026-11-17"
+        d.run_daily()
+        self.assertNotIn("Attachments", d.mail.sent[2], "part 2 has no pictures")
+        clock.date = "2026-11-18"
+        d.blob.fail = True
+        d.run_daily()
+        last = d.mail.sent[3]
+        self.assertNotIn("Attachments", last, "Blob down: the part still goes, without its picture")
+        self.assertNotIn("cid:", last["HtmlBody"])
+        d.blob.fail = False
+        self.assertEqual(set(d.blob.ttl.values()), {31}, "deleted 30 days after the drip ends")
+        self.assertEqual(d.redis.ttl[app.OWN_PICS + book[len(app.OWN):]], app.OWN_KEEP_SECONDS)
+
+    def test_pictures_without_blob_keep_captions(self):
+        d, _, _ = make()
+        out = self.start(d, lessons=self.picture_lessons())
+        self.assertEqual(out["status"], "sent")
+        parts = d.book(d.get_sub(token_from(d.mail.sent[0], "confirm"))["book"])["parts"]
+        self.assertNotIn("img", [k for part in parts for k, _ in part])
+        self.assertIn(("note", "Figure 1: a map"), parts[0])
+
+    def test_picture_limits(self):
+        d, _, _ = make()
+        d.blob = FakeBlob()
+        out = self.start(d, lessons=self.picture_lessons())
+        big = {"i0": {"type": "image/jpeg", "data": base64.b64encode(b"x" * 4_000_000).decode()}}
+        with mock.patch.object(app, "MAX_PART_PICTURE_BYTES", 3_000_000):
+            with self.assertRaises(Problem) as e:
+                d.add_pictures(out["book"], out["key"], 1, big)
+        self.assertEqual(e.exception.status, 413)
+        d.blob.fail = True
+        with self.assertRaises(Problem) as e:
+            d.add_pictures(out["book"], out["key"], 3, {"i2": {"type": "image/png", "data": "AAAA"}})
+        self.assertEqual(e.exception.status, 502)
+        self.assertEqual(d.pictures_done(out["book"], out["key"])["status"], "sent", "the drip goes without them")
+
+    def test_blob_only_sends_its_token_to_blob(self):
+        with self.assertRaises(ValueError):
+            app.Blob("tok").get("https://evil.example/own/x/1-0.json")
+
     def test_safe_inline(self):
         self.assertEqual(app.safe_inline('<em>a</em> &amp; <script>x</script><strong>b'),
                          "<em>a</em> &amp; &lt;script&gt;x&lt;/script&gt;<strong>b</strong>")
@@ -508,7 +617,7 @@ class EntryPointsTest(unittest.TestCase):
         import importlib.util
         from http.server import BaseHTTPRequestHandler
         api = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "api")
-        for name in ("subscribe", "confirm", "next", "cron"):
+        for name in ("subscribe", "confirm", "next", "cron", "request", "own", "pictures"):
             spec = importlib.util.spec_from_file_location(f"api_{name}", os.path.join(api, f"{name}.py"))
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)

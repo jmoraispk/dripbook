@@ -255,6 +255,158 @@
     });
   }
 
+  // ---------------------------------------------------------------- figures
+  // The drawings and images on a page, from PDF.js (page.getOperatorList(), its OPS table and
+  // viewport.transform at scale 1): graphics as [x0, top, x1, bottom, "line" | "curve" | "rect"]
+  // for each painted path segment, and images as [x0, top, x1, bottom], top measured down.
+  function graphicsFromOps(list, OPS, viewTransform) {
+    const mul = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3],
+                           a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
+    const box = (m, pts) => {
+      const xs = [], ys = [];
+      for (let i = 0; i < pts.length; i += 2) {
+        xs.push(m[0] * pts[i] + m[2] * pts[i + 1] + m[4]);
+        ys.push(m[1] * pts[i] + m[3] * pts[i + 1] + m[5]);
+      }
+      return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    };
+    const paints = new Set(["stroke", "closeStroke", "fill", "eoFill", "fillStroke", "eoFillStroke", "closeFillStroke",
+                            "closeEOFillStroke"].map((k) => OPS[k]));
+    const imageOps = new Set(["paintImageXObject", "paintInlineImageXObject", "paintImageMaskXObject", "paintJpegXObject",
+                              "paintImageXObjectRepeat", "paintSolidColorImageMask"].map((k) => OPS[k]).filter((v) => v != null));
+    const graphics = [], images = [], stack = [];
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const {fnArray: fns, argsArray: args} = list;
+    for (let i = 0; i < fns.length; i++) {
+      const fn = fns[i], a = args[i];
+      if (fn === OPS.save) stack.push(ctm);
+      else if (fn === OPS.restore) ctm = stack.pop() || ctm;
+      else if (fn === OPS.transform) ctm = mul(ctm, a);
+      else if (fn === OPS.paintFormXObjectBegin) { stack.push(ctm); if (Array.isArray(a?.[0])) ctm = mul(ctm, a[0]); }
+      else if (fn === OPS.paintFormXObjectEnd) ctm = stack.pop() || ctm;
+      else if (imageOps.has(fn)) images.push(box(mul(viewTransform, ctm), [0, 0, 1, 0, 0, 1, 1, 1]));
+      else if (fn === OPS.constructPath && paints.has(fns[i + 1])) {
+        const m = mul(viewTransform, ctm), [ops, xy] = a;
+        let k = 0, cx = 0, cy = 0, sx = 0, sy = 0;
+        const seg = (kind, pts) => { const [x0, y0, x1, y1] = box(m, pts); graphics.push([x0, y0, x1, y1, kind]); };
+        for (const op of ops) {
+          if (op === OPS.moveTo) { cx = sx = xy[k++]; cy = sy = xy[k++]; }
+          else if (op === OPS.lineTo) { const x = xy[k++], y = xy[k++]; seg("line", [cx, cy, x, y]); cx = x; cy = y; }
+          else if (op === OPS.curveTo) { const q = xy.slice(k, k + 6); k += 6; seg("curve", [cx, cy, ...q]); cx = q[4]; cy = q[5]; }
+          else if (op === OPS.curveTo2 || op === OPS.curveTo3) { const q = xy.slice(k, k + 4); k += 4; seg("curve", [cx, cy, ...q]); cx = q[2]; cy = q[3]; }
+          else if (op === OPS.rectangle) { const [x, y, w, h] = xy.slice(k, k + 4); k += 4; seg("rect", [x, y, x + w, y + h]); cx = sx = x; cy = sy = y; }
+          else if (op === OPS.closePath) { if (cx !== sx || cy !== sy) seg("line", [cx, cy, sx, sy]); cx = sx; cy = sy; }
+        }
+      }
+    }
+    return {graphics, images};
+  }
+
+  const CAPTION = /^(Figure|Fig\.|Table|Listing|Diagram|Exhibit|Illustration|Image)\s+[\dA-Z]+([.\-]\d+)*\s*[:.]?/i;
+  const itemBox = (it) => [it.x, it.base - 0.85 * it.size, it.x + it.w, it.base + 0.25 * it.size];
+  const inside = (it, box, pad = 2) => {
+    const cx = it.x + it.w / 2, cy = it.base - 0.3 * it.size;
+    return box[0] - pad <= cx && cx <= box[2] + pad && box[1] - pad <= cy && cy <= box[3] + pad;
+  };
+  // A box drawn around ordinary text (a code listing, a callout): most lines start at one margin.
+  const looksLikeText = (lines) => {
+    if (lines.length < 2) return false;
+    const left = Math.min(...lines.map((l) => l.x));
+    return lines.filter((l) => Math.abs(l.x - left) < 2.5).length >= 0.6 * lines.length;
+  };
+
+  // Boxes made of drawings or images, merged when they touch (convert.py's figure_regions).
+  function figureRegions(page) {
+    const {width: w, height: h} = page;
+    const items = [];
+    for (const [x0, top, x1, bottom, kind] of page.graphics || []) {
+      const gw = x1 - x0, gh = bottom - top;
+      if ((gh < 2.5 && gw > 0.25 * w) || (gw > 0.9 * w && gh > 0.9 * h) || (gw < 0.5 && gh < 0.5)) continue;
+      items.push({box: [x0, top, x1, bottom], curves: kind === "curve", image: false, parts: [[x0, top, x1, bottom]]});
+    }
+    for (const [x0, top, x1, bottom] of page.images || []) {
+      if (x1 - x0 >= 16 && bottom - top >= 16 && !(x1 - x0 > 0.9 * w && bottom - top > 0.9 * h)) {
+        items.push({box: [x0, top, x1, bottom], curves: false, image: true, parts: [[x0, top, x1, bottom]]});
+      }
+    }
+    let regions = items, merged = true;
+    while (merged) {
+      merged = false;
+      const out = [];
+      for (const it of regions) {
+        const m = out.find((m) => it.box[0] <= m.box[2] + 8 && m.box[0] <= it.box[2] + 8 && it.box[1] <= m.box[3] + 8 && m.box[1] <= it.box[3] + 8);
+        if (m) {
+          m.box = [Math.min(m.box[0], it.box[0]), Math.min(m.box[1], it.box[1]), Math.max(m.box[2], it.box[2]), Math.max(m.box[3], it.box[3])];
+          m.curves ||= it.curves; m.image ||= it.image; m.parts = m.parts.concat(it.parts);
+          merged = true;
+        } else out.push({...it});
+      }
+      regions = out;
+    }
+    return regions;
+  }
+
+  // The figures on one page and the text items left for the flow (convert.py's page_layout).
+  // A figure's labels come out of the text; its crop box takes them in.
+  function figuresOnPage(page) {
+    let items = page.items || [];
+    const figures = [];
+    for (const region of figureRegions(page)) {
+      let box = region.box;
+      const [bw, bh] = [box[2] - box[0], box[3] - box[1]];
+      if (!region.image && (bw < 40 || bh < 25)) continue;
+      if (!(region.image || region.curves || region.parts.length >= 3)) continue;   // a frame or a shaded background
+      const within = items.filter((it) => inside(it, box));
+      const interior = region.parts.some((g) => g[0] > box[0] + 3 && g[1] > box[1] + 3 && g[2] < box[2] - 3 && g[3] < box[3] - 3);
+      if (!region.image && !interior && looksLikeText(linesFromItems(within))) continue;
+      if (!region.image) {
+        // labels of a drawing often sit beside or just outside it: take the whole band
+        const band = [0, box[1] - 9, page.width, box[3] + 9];
+        const beside = linesFromItems(items.filter((it) => inside(it, band, 0)));
+        box = looksLikeText(beside) && beside.length > 3 ? region.box : band;
+      }
+      const pad = box[0] === 0 ? 0 : 2;
+      const taken = items.filter((it) => inside(it, box, pad));
+      items = items.filter((it) => !inside(it, box, pad));
+      let crop = [...region.box];
+      for (const it of taken) {
+        const b = itemBox(it);
+        crop = [Math.min(crop[0], b[0]), Math.min(crop[1], b[1]), Math.max(crop[2], b[2]), Math.max(crop[3], b[3])];
+      }
+      crop = [Math.max(0, crop[0] - 4), Math.max(0, crop[1] - 4), Math.min(page.width, crop[2] + 4), Math.min(page.height, crop[3] + 4)];
+      figures.push({top: box[1], bottom: box[3], kind: region.image ? "image" : "drawing", caption: "", box: crop.map(tenth)});
+    }
+    // One figure made of pieces in a row becomes one figure.
+    const joined = [];
+    for (const f of figures.sort((p, q) => p.box[0] - q.box[0])) {
+      const g = joined.find((g) => Math.min(f.bottom, g.bottom) - Math.max(f.top, g.top) > 0.5 * Math.min(f.bottom - f.top, g.bottom - g.top));
+      if (g) {
+        g.box = [Math.min(g.box[0], f.box[0]), Math.min(g.box[1], f.box[1]), Math.max(g.box[2], f.box[2]), Math.max(g.box[3], f.box[3])];
+        g.top = Math.min(g.top, f.top); g.bottom = Math.max(g.bottom, f.bottom);
+        if (f.kind === "image") g.kind = "image";
+      } else joined.push({...f});
+    }
+    return {figures: joined.sort((p, q) => p.top - q.top), items};
+  }
+
+  // A caption sits just below or just above its figure, and may wrap onto two more lines.
+  // Takes the caption lines out of `lines`.
+  function takeCaptions(figures, lines) {
+    for (const f of figures) {
+      const near = lines.filter((l) => CAPTION.test(l.text.trim()) &&
+        ((l.base - f.bottom >= 0 && l.base - f.bottom <= 3.5 * l.size) || (f.top - l.base >= 0 && f.top - l.base <= 2.5 * l.size)));
+      if (!near.length) continue;
+      const caption = [near[0]];
+      for (const l of lines) {
+        const last = caption.at(-1);
+        if (caption.length < 3 && l.base - last.base > 0 && l.base - last.base <= 1.5 * l.size && l.size <= caption[0].size + 0.1) caption.push(l);
+      }
+      f.caption = caption.map((l) => l.text.trim()).join(" ");
+      lines = lines.filter((l) => !caption.includes(l));
+    }
+    return lines;
+  }
+
   // Running heads and page numbers: short first or last lines that repeat across pages.
   function furniture(pages) {
     const key = (text) => text.toLowerCase().replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
@@ -282,13 +434,19 @@
     return best;
   }
 
-  // pages: [{number, width, height, items}]. Returns blocks shaped like convert.py's
-  // (id, type, page, top, end_page, bottom, level, text, words), without runs or figures.
+  // pages: [{number, width, height, items, graphics?, images?}]. Returns blocks shaped like
+  // convert.py's (id, type, page, top, end_page, bottom, level, text, words), without runs.
+  // Pages with graphics or images (graphicsFromOps) also give figure blocks: {type: "figure",
+  // kind, caption, box: [x0, top, x1, bottom]}, the box to crop from the page.
   function blocksFromPages(pages) {
-    const read = pages.map((p) => ({...p, lines: linesFromItems(p.items || [])}));
+    const read = pages.map((p) => {
+      const {figures, items} = p.graphics || p.images ? figuresOnPage(p) : {figures: [], items: p.items || []};
+      const lines = takeCaptions(figures, linesFromItems(items));
+      return {...p, lines, figures};
+    });
     const skip = furniture(read);
     const all = read.flatMap((p) => p.lines.filter((l) => !skip.has(l)));
-    if (!all.length) return [];
+    if (!all.length && !read.some((p) => p.figures.length)) return [];
     const body = mode(all.filter((l) => !l.mono).map((l) => [round(l.size, 0.5), l.text.length])) || 10;
     const gaps = [];
     for (const p of read) {
@@ -317,7 +475,16 @@
       const margin = bodyLines.length ? mode(bodyLines.map((l) => round(l.x, 1))) : 0;
       const right = bodyLines.length ? Math.max(...bodyLines.map((l) => l.right)) : p.width;
       let n = 0, prev = null;
-      for (const line of lines) {
+      const events = [...p.figures.map((f) => ({at: f.top, figure: f})), ...lines.map((l) => ({at: l.base, line: l}))]
+        .sort((x, y) => x.at - y.at || (x.figure ? -1 : 1));
+      for (const {figure, line} of events) {
+        if (figure) {
+          finish();
+          n += 1;
+          blocks.push({id: `p${p.number}.${n}`, type: "figure", page: p.number, top: tenth(figure.top), end_page: p.number,
+                       bottom: tenth(figure.bottom), text: "", kind: figure.kind, caption: figure.caption, box: figure.box});
+          continue;
+        }
         const kind = kindOf(line);
         let fresh = !cur || cur.type !== kind;
         if (!fresh && !prev) {
@@ -518,6 +685,6 @@
 
   return {WORDS_PER_MINUTE, TARGET, WARN, fromPlan, toPlan, words, minutes, headingLabel, subjectAt, moveCut, split,
           merge, setKind, setText, syncTeasers, days, warnings, boundaryPos, endPage, regionsOnPage,
-          boundariesOnPage, stats, itemsFromText, linesFromItems, blocksFromPages, blockAt, chapterStarts, defaultSegments,
+          boundariesOnPage, stats, itemsFromText, linesFromItems, graphicsFromOps, blocksFromPages, blockAt, chapterStarts, defaultSegments,
           splitAtSections, splitLong, toCuts, fromCuts};
 });

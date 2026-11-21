@@ -182,7 +182,7 @@ def cut_blocks(found, pace, skip_front=True):
 
 
 def part_words(part):
-    return sum(words(t) for _, t in part)
+    return sum(words(t) for k, t in part if k != "img")
 
 
 def part_heading(part):
@@ -241,7 +241,8 @@ def inline(text):
 
 
 def to_html(part, styles=None):
-    """A part as email html. styles maps a kind (p, h, h3, quote, verse, note) to inline CSS."""
+    """A part as email html. styles maps a kind (p, h, h3, quote, verse, note) to inline CSS, and
+    "img" to a function that turns a picture block into html (pictures are left out without it)."""
     st = styles or {}
     out, quote = [], []
 
@@ -257,7 +258,9 @@ def to_html(part, styles=None):
             quote.append(f'<p style="{st.get("quote", "")}">{text}</p>')
             continue
         end_quote()
-        if is_heading(kind):
+        if kind == "img":
+            out.append(st["img"](text) if callable(st.get("img")) else "")
+        elif is_heading(kind):
             tag = "h2" if level(kind) <= 2 else "h3"
             out.append(f'<{tag} style="{st.get(tag, "")}">{text}</{tag}>')
         elif kind == "verse":
@@ -273,7 +276,7 @@ def to_html(part, styles=None):
 def to_text(part):
     out = []
     for kind, text in part:
-        if kind == "pg":
+        if kind in ("pg", "img"):
             continue
         t = plain(text)
         out.append("    " + t.replace("\n", "\n    ") if kind in ("quote", "verse") else t)

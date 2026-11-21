@@ -218,7 +218,7 @@ label.btn,a.btn{display:inline-flex;align-items:center;cursor:pointer;text-decor
     <label class="field">Title <input id="mail-book" maxlength="200" required></label>
     <label class="field">Your email <input id="mail-email" type="email" autocomplete="email" required></label>
     <label class="rights"><input type="checkbox" id="mail-rights" required> <span>This PDF is mine to use this way: I wrote it, I own the rights, or I have permission.</span></label>
-    <p>We email you a link to confirm. Lesson 1 comes when you click it, then one each morning. We keep the text only to send it, and delete it 30 days after the last lesson. <a href="privacy.html" target="_blank" rel="noopener">Privacy</a></p>
+    <p>We email you a link to confirm. Lesson 1 comes when you click it, then one each morning. We keep the text and pictures only to send them, and delete them 30 days after the last lesson. <a href="privacy.html" target="_blank" rel="noopener">Privacy</a></p>
     <div class="actions"><button type="submit" class="btn btn-primary" id="mail-go">Start my drip</button><button type="button" class="btn" id="mail-cancel">Cancel</button></div>
     <p class="msg" id="mail-msg" role="status"></p>
   </form>
@@ -320,11 +320,14 @@ function status(html) {
 async function readBook() {
   const pages = [];
   const n = S.pdf.numPages;
+  const {OPS} = await pdfjs();
   for (let p = 1; p <= n; p++) {
     const page = await S.pdf.getPage(p);
     const vp = page.getViewport({scale: 1});
     S.sizes.set(p, {w: vp.width, h: vp.height});
-    pages.push({number: p, width: vp.width, height: vp.height, items: C.itemsFromText(await page.getTextContent(), vp)});
+    let art = {};   // drawings and images, where figures come from
+    try { art = C.graphicsFromOps(await page.getOperatorList(), OPS, vp.transform); } catch (e) { console.error(e); }
+    pages.push({number: p, width: vp.width, height: vp.height, items: C.itemsFromText(await page.getTextContent(), vp), ...art});
     if (p % 10 === 0 || p === n) status(`Reading page ${p} of ${n}…<br><progress max="${n}" value="${p}"></progress>`);
   }
   const outline = [];
@@ -931,8 +934,9 @@ function renderEmail(el, seg, skip) {
 
 // ------------------------------------------------------------------ email it to me
 
-// The lessons as the drip sends them (api/own.py): [[kind, html], ...] per lesson, text only.
+// The lessons as the drip sends them (api/own.py): [[kind, html], ...] per lesson.
 // A ["pg", n] marker goes before the first block on each new page, for the email's page range.
+// A figure is ["img", "i7 480"]: picture i7, shown 480 px wide, uploaded after (api/pictures.py).
 function inlineHTML(b) {
   return (b.runs || [[b.text || "", ""]]).map(([t, style]) => {
     let h = esc(t);
@@ -942,9 +946,9 @@ function inlineHTML(b) {
     return h;
   }).join("");
 }
-function emailLessons() {
+function emailLessons(figures = []) {
   let page = null;
-  return S.segs.filter((s) => s.kind === "lesson").map((seg) => {
+  return S.segs.filter((s) => s.kind === "lesson").map((seg, k) => {
     const out = [];
     for (let i = seg.a; i <= seg.b; i++) {
       const b = S.blocks[i];
@@ -952,20 +956,82 @@ function emailLessons() {
       if (b.type === "heading") out.push([(b.level || 1) <= 1 ? "h2" : "h3", esc(b.text).replace(/\s+/g, " ")]);
       else if (b.type === "code") out.push(["verse", esc(b.text)]);
       else if (b.type === "list_item") out.push(["p", `${esc(b.marker)} ${inlineHTML(b)}`]);
-      else if (b.type === "figure") { if (b.caption) out.push(["note", esc(b.caption)]); }
+      else if (b.type === "figure") {
+        if (b.box) {
+          const name = `i${figures.length}`;
+          figures.push({name, part: k + 1, block: b});
+          out.push(["img", `${name} ${Math.min(560, Math.max(1, Math.round((b.box[2] - b.box[0]) * 1.1)))}`]);
+        }
+        if (b.caption) out.push(["note", esc(b.caption)]);
+      }
       else if (b.type === "footnote") out.push(["note", inlineHTML(b)]);
       else out.push([b.quote ? "quote" : "p", inlineHTML(b)]);
     }
     return out;
   });
 }
+// A figure cut from its page at up to 1200 px wide, as JPEG or PNG, whichever is smaller.
+async function figureImage(b) {
+  const page = await S.pdf.getPage(b.page);
+  const [x0, y0, x1, y1] = b.box;
+  const scale = Math.min(1200 / Math.max(1, x1 - x0), 3);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round((x1 - x0) * scale));
+  canvas.height = Math.max(1, Math.round((y1 - y0) * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({canvasContext: ctx, viewport: page.getViewport({scale}), transform: [1, 0, 0, 1, -x0 * scale, -y0 * scale]}).promise;
+  const encode = (type, q) => new Promise((ok) => canvas.toBlob(ok, type, q));
+  const [jpeg, png] = await Promise.all([encode("image/jpeg", 0.85), encode("image/png")]);
+  const best = png && (!jpeg || png.size <= jpeg.size) ? png : jpeg;
+  const url = await new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = fail; r.readAsDataURL(best); });
+  return {type: best.type, data: url.slice(url.indexOf(",") + 1), size: best.size};
+}
+
+async function postJSON(url, body) {
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  return {r, data: await r.json().catch(() => ({}))};
+}
+
+// Each part's pictures in as few requests as fit under Vercel's 4.5 MB, then the confirmation email.
+const BATCH_BYTES = 3_000_000, PART_BYTES = 6_500_000;
+async function uploadPictures(upload, figures) {
+  let missed = 0, stop = false;
+  const parts = [...new Set(figures.map((f) => f.part))];
+  for (const [i, part] of parts.entries()) {
+    mailMsg(`Adding pictures: lesson ${i + 1} of ${parts.length}…`);
+    let batch = {}, batchBytes = 0, partBytes = 0;
+    const send = async () => {
+      if (!Object.keys(batch).length) return;
+      const n = Object.keys(batch).length;
+      const {r} = stop ? {r: {ok: false}} : await postJSON("/api/pictures", {book: upload.book, key: upload.key, part, images: batch});
+      if (!r.ok) { missed += n; if (r.status === 502 || r.status === 503) stop = true; }
+      batch = {}; batchBytes = 0;
+    };
+    for (const f of figures.filter((f) => f.part === part)) {
+      let img = null;
+      try { img = await figureImage(f.block); } catch (e) { console.error(e); }
+      if (!img || partBytes + img.size > PART_BYTES) { missed++; continue; }
+      if (batchBytes + img.size > BATCH_BYTES) await send();
+      batch[f.name] = {type: img.type, data: img.data};
+      batchBytes += img.size; partBytes += img.size;
+    }
+    await send();
+  }
+  return missed;
+}
+
 function mailMsg(text, err) {
   $("#mail-msg").textContent = text;
   $("#mail-msg").className = "msg" + (err ? " err" : "");
 }
 $("#mail-me").onclick = () => {
   const st = C.stats(S.blocks, S.segs);
-  $("#mail-summary").textContent = `${st.lessons} lessons of about ${st.median} minutes. Pictures stay out: emails carry the text.`;
+  const figures = [];
+  emailLessons(figures);
+  $("#mail-summary").textContent = `${st.lessons} lessons of about ${st.median} minutes` +
+    (figures.length ? `, with ${figures.length} picture${figures.length === 1 ? "" : "s"} in the text.` : ".");
   $("#mail-book").value = S.plan.book?.title || S.pdfName.replace(/\.pdf$/i, "");
   mailMsg("");
   $("#mail-go").disabled = false;
@@ -979,14 +1045,18 @@ $("#mail-form").addEventListener("submit", async (e) => {
   mailMsg("Sending…");
   let tz = "";
   try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch {}
+  const figures = [];
+  const lessons = emailLessons(figures);
   try {
-    const r = await fetch("/api/own", {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({email: $("#mail-email").value, title: $("#mail-book").value, tz,
-                            rights: $("#mail-rights").checked, lessons: emailLessons()}),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (r.ok) mailMsg(data.message || "Check your inbox for a link from Dripbook.");
+    let {r, data} = await postJSON("/api/own", {email: $("#mail-email").value, title: $("#mail-book").value, tz,
+                                                rights: $("#mail-rights").checked, lessons});
+    let missed = 0;
+    if (r.ok && data.status === "upload") {
+      missed = await uploadPictures(data, figures);
+      ({r, data} = await postJSON("/api/pictures", {book: data.book, key: data.key, done: true}));
+    }
+    if (r.ok) mailMsg((data.message || "Check your inbox for a link from Dripbook.") +
+                      (missed ? ` ${missed} picture${missed === 1 ? "" : "s"} didn't upload, so ${missed === 1 ? "it shows its" : "they show their"} caption instead.` : ""));
     else { mailMsg(data.error || (r.status === 413 ? "This book is too long to send in one go. Try a shorter PDF." : "That didn't work. Try again in a minute."), true); $("#mail-go").disabled = false; }
   } catch {
     mailMsg("We couldn't reach Dripbook. Check your connection and try again.", true);
