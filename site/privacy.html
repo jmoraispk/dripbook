@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Privacy · Dripbook</title>
-<meta name="description" content="What Dripbook collects when you upload your book, and what we do with it.">
+<meta name="description" content="What Dripbook keeps when you start a drip, ask for a book or send a PDF, and how to have it deleted.">
 <meta name="theme-color" content="#141B33">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,24 +23,42 @@
 
 <main class="wrap page">
   <h1>Privacy</h1>
-  <p>Last updated 8 November 2026.</p>
+  <p>Last updated 21 November 2026.</p>
+  <p>Dripbook sends books to your inbox, a part at a time. This page says what we keep, why, who else handles it, and how to have it deleted.</p>
 
-  <h2>What we collect</h2>
-  <p>When you upload your book, we receive the PDF and the name and email address the upload page asks for. That is all. This site has no analytics, no tracking pixels and no cookies.</p>
+  <h2>What we keep</h2>
+  <p><strong>When you start a drip:</strong> your email address, the book, your pace, the time zone your browser reports, when you signed up and confirmed, and how many parts we've sent. If you don't confirm within 7 days, we delete the sign-up.</p>
+  <p><strong>When you ask for a book:</strong> the title, the author, your email address, whether you wrote it, and when you asked. We use it to see which books readers want, to ask their authors or publishers, and to tell you when one arrives. To drop accidental double requests, we keep a one-way fingerprint of your IP address with the request for 10 minutes. We never store the address itself.</p>
+  <p><strong>When you drip your own PDF:</strong> the PDF opens in your browser and is not uploaded. When you press Email it to me, we receive the text of your lessons (no pictures), the title and your email address. We use it only to send your lessons. Nobody reads it unless you ask us for help, nothing is shared or published, and it is never used to train AI. We delete it 30 days after your last lesson, or after 7 days if you never confirm.</p>
+  <p><strong>When you send us your book as an author:</strong> your name, email address, PDF and saved cuts. We use them to build your course and to talk to you about it, and we publish nothing without your go-ahead.</p>
 
-  <h2>What we do with it</h2>
+  <h2>What you confirm</h2>
   <ul>
-    <li>We use your email to tell you when your sales page is ready, and to talk to you about your book.</li>
-    <li>We use your PDF only to build your course. It stays yours, and we never share or publish it without your go-ahead.</li>
-    <li>We do not sell your details or add you to anyone else's list.</li>
+    <li>A PDF you drip to yourself is one you may use this way: you wrote it, you own the rights, or you have permission.</li>
+    <li>A book you send us as its author is yours to publish: you wrote it or hold the rights, and it doesn't infringe anyone else's.</li>
   </ul>
+  <p>If you think something sent through Dripbook infringes your rights, email us and we will remove it.</p>
+
+  <h2>What we don't do</h2>
+  <ul>
+    <li>No analytics, advertising trackers or cookies on this site.</li>
+    <li>No open or click tracking in our emails.</li>
+    <li>We don't sell your details, share them, or add you to anyone else's list.</li>
+  </ul>
+  <p>The PDF editor keeps your draft cuts in your browser's storage, on your device. Clearing your browser's site data removes them.</p>
 
   <h2>Who else handles it</h2>
-  <p>The page where you cut your book into lessons reads your PDF inside your browser; nothing is sent until you upload. That page loads its PDF reader from jsDelivr, so your browser shares your IP address with jsDelivr when it opens.</p>
-  <p>Uploads go through a Dropbox file request, so Dropbox stores your PDF and the details you enter until we move them. Fonts on this site load from Google Fonts, so your browser shares your IP address with Google when the page opens.</p>
+  <ul>
+    <li><strong>Vercel</strong> hosts the site and runs sign-ups. Its logs see your IP address.</li>
+    <li><strong>Upstash</strong> holds our database: sign-ups, requests and your own lessons.</li>
+    <li><strong>Postmark</strong> sends our emails and keeps a record of each one for up to 45 days.</li>
+    <li><strong>Dropbox</strong> receives author uploads until we move them.</li>
+    <li><strong>jsDelivr</strong> serves the editor's PDF reader, and <strong>Google Fonts</strong> serves our fonts. Both see your IP address when a page loads.</li>
+  </ul>
+  <p>These companies may handle your data outside your country.</p>
 
-  <h2>Keeping and deleting it</h2>
-  <p>We keep your details until you ask us to remove them. Email <a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a> to see, correct or delete what we hold about you.</p>
+  <h2>Stopping and deleting</h2>
+  <p>Every drip email has an unsubscribe link, which stops it at once. To see, correct or delete everything we hold about you, email <a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a>.</p>
 </main>
 
 <footer>

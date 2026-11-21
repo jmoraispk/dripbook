@@ -20,8 +20,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "drip"))
-from app import REQUESTS, Redis, load_library  # noqa: E402
+from app import OLD_REQUESTS, REQUESTS, Redis, load_library  # noqa: E402
 
+# book is a library id, or own:… for a reader's own PDF.
 SUB_FIELDS = ["email", "book", "title", "status", "pace", "sent", "tz", "created", "confirmed", "last_day"]
 REQUEST_FIELDS = ["at", "title", "author", "email", "mine"]
 
@@ -54,15 +55,15 @@ def subscribers(redis, library):
             if raw:
                 sub = json.loads(raw)
                 rows.append({**{k: sub.get(k, "") for k in SUB_FIELDS},
-                             "title": library.get(sub.get("book"), {}).get("title", ""),
+                             "title": sub.get("title") or library.get(sub.get("book"), {}).get("title", ""),
                              "created": when(sub.get("created")), "confirmed": when(sub.get("confirmed"))})
     return sorted(rows, key=lambda r: r["created"])
 
 
 def requests(redis):
     """Every book request, oldest first."""
-    flat = redis("HGETALL", REQUESTS) or []
-    rows = [json.loads(v) for v in flat[1::2]]
+    rows = [json.loads(v) for v in redis("LRANGE", REQUESTS, 0, -1) or []]
+    rows += [json.loads(v) for v in (redis("HGETALL", OLD_REQUESTS) or [])[1::2]]   # from before 22 Nov 2026
     rows.sort(key=lambda r: r.get("at", 0))
     return [{**{k: r.get(k, "") for k in REQUEST_FIELDS}, "at": when(r.get("at")),
              "mine": "yes" if r.get("mine") else ""} for r in rows]

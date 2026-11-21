@@ -103,7 +103,15 @@ def request_book(req):
     if data.get("website"):   # a field people never see: only bots fill it in
         return 200, JSON, json.dumps({"status": "saved", "message": "Thanks."})
     mine = str(data.get("mine", "")).lower() in ("1", "true", "on", "yes")
-    out = drip(mail=False).request_book(data.get("title"), data.get("author"), data.get("email"), mine)
+    sender = req.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    out = drip(mail=False).request_book(data.get("title"), data.get("author"), data.get("email"), mine, sender)
+    return 200, JSON, json.dumps(out)
+
+
+def subscribe_own(req):
+    data = req.data()
+    out = drip().subscribe_own(data.get("email"), data.get("title"), data.get("lessons"), req.base(),
+                               data.get("tz"), data.get("rights") is True)
     return 200, JSON, json.dumps(out)
 
 
@@ -150,7 +158,8 @@ def cron(req):
 
 
 # --- Vercel adapter ---------------------------------------------------------------------
-def handler_for(get=None, post=None, kind=HTML):
+def handler_for(get=None, post=None, kind=HTML, limit=10_000):
+    """limit is the largest body taken, in bytes; Vercel stops at 4.5 MB."""
     routes = {"GET": get and guarded(get, kind), "POST": post and guarded(post, kind)}
 
     class Handler(BaseHTTPRequestHandler):
@@ -166,8 +175,12 @@ def handler_for(get=None, post=None, kind=HTML):
                 status, ctype, body = 405, JSON, json.dumps({"error": "method not allowed"})
             else:
                 length = int(self.headers.get("content-length") or 0)
-                body = self.rfile.read(min(length, 10_000)) if length else b""
-                status, ctype, body = fn(Request(method, self.path, dict(self.headers), body))
+                if length > limit:
+                    status, ctype = 413, JSON
+                    body = json.dumps({"error": "That's too much to send in one go. Try a shorter PDF."})
+                else:
+                    body = self.rfile.read(length) if length else b""
+                    status, ctype, body = fn(Request(method, self.path, dict(self.headers), body))
             data = body.encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", ctype)

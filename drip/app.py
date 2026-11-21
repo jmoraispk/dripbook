@@ -6,6 +6,9 @@ State lives in Upstash Redis (REST API), email goes through Postmark:
   active                set of tokens that get a part every morning
   blocks:{id}           a book as cut.py blocks (JSON, gzip, base64), read once from Gutenberg's mirror:
                         the HTML edition, or the plain text when the HTML is missing or garbled
+  own:{id}              a reader's own PDF as the parts they cut in the editor (JSON, gzip, base64);
+                        own-books tracks when each expires (30 days after its drip ends)
+  book-requests         list of book requests, one JSON entry each
 
 A subscription is 'pending' until its link is confirmed (kept 7 days), then 'active'
 until the last part ('done') or until Postmark says the reader unsubscribed ('stopped').
@@ -13,6 +16,7 @@ Parts are cut on the fly from the cached blocks (drip/cut.py is deterministic an
 """
 import base64
 import gzip
+import hashlib
 import html
 import json
 import os
@@ -41,9 +45,22 @@ RESEND_SECONDS = 60
 MIN_WORDS = 500          # below this the "book" is a stub (music, scans), not a drip
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TIME_ZONE = re.compile(r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$")   # an IANA name like Europe/Lisbon
-# Book requests live in one Redis hash, one field per reader and title, so asking twice keeps one.
-REQUESTS = "requests"
-MAX_REQUESTS = 20_000    # a ceiling, so a flood of junk can't fill the database
+# Book requests: a Redis list with one entry per request. Only an identical request from the
+# same address within 10 minutes (a double click) is dropped.
+REQUESTS = "book-requests"
+OLD_REQUESTS = "requests"   # the first version kept a hash; the export still reads it
+MAX_REQUESTS = 20_000       # a ceiling, so a flood of junk can't fill the database
+REPEAT_SECONDS = 600
+# Drips of a reader's own PDF: the lessons they made in the cut editor (site/cuts.html), kept
+# while the drip runs and for 30 days after it ends. Pending ones go when the sign-up expires.
+OWN = "own:"
+OWN_BOOKS = "own-books"           # sorted set: book key -> when it expires (inf while active)
+OWN_KEEP_SECONDS = 30 * 24 * 3600
+MAX_OWN_BOOKS = 200               # books stored at once: a ceiling for the free database
+MAX_OWN_BYTES = 900_000           # compressed; Upstash's free plan takes requests up to 1 MB
+MAX_OWN_LESSONS = 1000
+OWN_KINDS = {"h2", "h3", "p", "quote", "verse", "note", "pg"}
+INLINE_TAG = re.compile(r"(</?(?:em|strong|sup|sub)>)")
 
 
 class Problem(Exception):
@@ -157,13 +174,23 @@ class Drip:
             self.redis("SET", k, v, "EX", expire) if expire else self.redis("SET", k, v)
 
     def book(self, book_id):
-        """{'title', 'author', 'blocks'} for a book, from the cache or Gutenberg's mirror."""
+        """{'title', 'author', 'blocks'} for a book, from the cache or Gutenberg's mirror.
+        A reader's own PDF has 'parts' instead of 'blocks': the lessons they cut in the editor."""
         if book_id in self._books:
             return self._books[book_id]
+        if book_id.startswith(OWN):
+            raw = self.redis("GET", book_id)
+            if not raw:
+                raise Problem(404, "We don't have this book any more. Open it in the editor again to restart it.")
+            data = unpack(raw)
+            book = {"title": data["title"], "author": "", "own": True,
+                    "parts": [[tuple(b) for b in part] for part in data["parts"]]}
+            self._books[book_id] = book
+            return book
         info = self.library[book_id]
         raw = self.redis("GET", f"blocks:{book_id}")
         if raw:
-            blocks = [tuple(b) for b in json.loads(gzip.decompress(base64.b64decode(raw)))]
+            blocks = [tuple(b) for b in unpack(raw)]
         else:
             try:
                 text = self.fetch(book_id)
@@ -176,13 +203,15 @@ class Drip:
             blocks = read_book(text, page)
             if sum(cut.words(t) for _, t in blocks) < MIN_WORDS:
                 raise Problem(422, "This one isn't available as a drip. Try another book.")
-            packed = gzip.compress(json.dumps(blocks, separators=(",", ":")).encode("utf-8"), 9)
-            self.redis("SET", f"blocks:{book_id}", base64.b64encode(packed).decode())
+            self.redis("SET", f"blocks:{book_id}", pack(blocks))
         book = {"title": info["title"], "author": info.get("author", ""), "blocks": blocks}
         self._books[book_id] = book
         return book
 
     def parts(self, sub):
+        book = self.book(sub["book"])
+        if "parts" in book:
+            return book["parts"]
         return cut.cut_blocks(self.book(sub["book"])["blocks"], sub["pace"], sub["book"] not in cut.KEEP_FRONT_MATTER)
 
     # Sign-up
@@ -237,12 +266,13 @@ class Drip:
         sub["status"] = "active"
         sub["confirmed"] = int(self.clock())
         self.save_sub(sub)
+        self.keep_own(sub["book"])
         self.redis("SADD", "active", sub["token"])
         return sub, self.send_next(sub)
 
     # Book requests
-    def request_book(self, title, author, email, mine=False):
-        """Save a request for a book we don't have yet. Asking again for the same title updates it."""
+    def request_book(self, title, author, email, mine=False, sender=""):
+        """Save a request for a book we don't have yet. Every request is kept, in order."""
         title, author = " ".join(str(title or "").split()), " ".join(str(author or "").split())
         email = str(email or "").strip().lower()
         if not title:
@@ -251,14 +281,63 @@ class Drip:
             raise Problem(400, "That's longer than any title we know. Shorten it a little.")
         if len(email) > 254 or not EMAIL.match(email):
             raise Problem(400, "That email address doesn't look right.")
-        field = f"{email}|{title.lower()}"
-        if not self.redis("HEXISTS", REQUESTS, field) and int(self.redis("HLEN", REQUESTS) or 0) >= MAX_REQUESTS:
-            raise Problem(503, "We can't take requests right now. Try again tomorrow.")
-        self.redis("HSET", REQUESTS, field, json.dumps({
-            "title": title, "author": author, "email": email, "mine": bool(mine), "at": int(self.clock())}))
         if mine:
-            return {"status": "saved", "message": f"Thanks. We'll write to {email} to set up {title} with you."}
-        return {"status": "saved", "message": f"Thanks. We'll ask for {title} and email {email} when it's here."}
+            reply = {"status": "saved", "message": f"Thanks. We'll write to {email} to set up {title} with you."}
+        else:
+            reply = {"status": "saved", "message": f"Thanks. We'll ask for {title} and email {email} when it's here."}
+        same = hashlib.sha256(json.dumps([sender, title, author, email, bool(mine)]).encode()).hexdigest()[:32]
+        if not self.redis("SET", f"request-seen:{same}", "1", "EX", REPEAT_SECONDS, "NX"):
+            return reply   # the same request again, moments later
+        if int(self.redis("LLEN", REQUESTS) or 0) >= MAX_REQUESTS:
+            raise Problem(503, "We can't take requests right now. Try again tomorrow.")
+        self.redis("RPUSH", REQUESTS, json.dumps({
+            "title": title, "author": author, "email": email, "mine": bool(mine), "at": int(self.clock())}))
+        return reply
+
+    # A reader's own PDF
+    def subscribe_own(self, email, title, lessons, base, tz="", rights=False):
+        """Start a drip of lessons cut in the editor. Same confirmation and mornings as a library book."""
+        email = str(email or "").strip().lower()
+        if len(email) > 254 or not EMAIL.match(email):
+            raise Problem(400, "That email address doesn't look right.")
+        if not rights:
+            raise Problem(400, "Tick the box to confirm you may use this PDF.")
+        if not self.allowed(email):
+            raise Problem(403, "Dripbook isn't open to everyone yet. Sign-up opens soon.")
+        title = " ".join(str(title or "").split())[:200] or "Your book"
+        parts = clean_lessons(lessons)
+        packed = pack({"title": title, "parts": parts})
+        if len(packed) > MAX_OWN_BYTES:
+            raise Problem(413, "This book is too long for us to send yet. Try a shorter PDF, or skip parts you don't need.")
+        if not self.redis("SET", f"own-asked:{email}", "1", "EX", RESEND_SECONDS, "NX"):
+            raise Problem(429, "We just sent you an email. Check your inbox, and your spam folder.")
+        now = int(self.clock())
+        self.redis("ZREMRANGEBYSCORE", OWN_BOOKS, "-inf", now)
+        if int(self.redis("ZCARD", OWN_BOOKS) or 0) >= MAX_OWN_BOOKS:
+            raise Problem(503, "We can't take more PDFs right now. Try again tomorrow.")
+        book_id = OWN + secrets.token_urlsafe(12)
+        self.redis("SET", book_id, packed, "EX", PENDING_SECONDS)
+        self.redis("ZADD", OWN_BOOKS, now + PENDING_SECONDS, book_id)
+        tz = str(tz or "")
+        sub = {"token": secrets.token_urlsafe(24), "email": email, "book": book_id, "title": title,
+               "status": "pending", "sent": 0, "last_day": "", "created": now, "pace": 0, "base": base,
+               "asked": now, "tz": tz if len(tz) <= 64 and TIME_ZONE.match(tz) else ""}
+        self.save_sub(sub, expire=PENDING_SECONDS)
+        reply = self.mail(confirm_email(sub, self.book(book_id), len(parts)))
+        if reply.get("ErrorCode", 1) != 0:
+            raise Problem(502, "We couldn't send the confirmation email. Try again in a minute.")
+        return {"status": "sent", "message": f"Almost there. We sent a link to {email}: click it to get lesson 1."}
+
+    def keep_own(self, book_id, seconds=None):
+        """Keep a reader's own book while their drip runs, or for `seconds` more."""
+        if not book_id.startswith(OWN):
+            return
+        if seconds is None:
+            self.redis("PERSIST", book_id)
+            self.redis("ZADD", OWN_BOOKS, "+inf", book_id)
+        else:
+            self.redis("EXPIRE", book_id, seconds)
+            self.redis("ZADD", OWN_BOOKS, int(self.clock()) + seconds, book_id)
 
     # Sending
     def send_next(self, sub):
@@ -286,6 +365,7 @@ class Drip:
         sub["status"] = status
         self.save_sub(sub)
         self.redis("SREM", "active", sub["token"])
+        self.keep_own(sub["book"], OWN_KEEP_SECONDS)
         return "sent" if sent else status
 
     def send_now(self, token):
@@ -312,6 +392,49 @@ class Drip:
                     outcome = "error"
             tally[outcome] = tally.get(outcome, 0) + 1
         return tally
+
+
+def pack(value):
+    """JSON, gzipped and base64'd: how books are kept in Redis."""
+    return base64.b64encode(gzip.compress(json.dumps(value, separators=(",", ":")).encode("utf-8"), 9)).decode()
+
+
+def unpack(raw):
+    return json.loads(gzip.decompress(base64.b64decode(raw)))
+
+
+def safe_inline(text):
+    """Html from the browser, cut down to text and <em>, <strong>, <sup> and <sub>."""
+    pieces = INLINE_TAG.split(text)
+    out = "".join(p if INLINE_TAG.fullmatch(p) else html.escape(html.unescape(p), quote=False) for p in pieces)
+    return gutenberg_html.close_tags(out)
+
+
+def clean_lessons(lessons):
+    """The editor's lessons, [[[kind, html], ...], ...], checked and made safe for an email."""
+    bad = Problem(400, "These lessons didn't come through. Reload the editor and try again.")
+    if not isinstance(lessons, list) or not lessons:
+        raise bad
+    if len(lessons) > MAX_OWN_LESSONS:
+        raise Problem(400, f"That's more than {MAX_OWN_LESSONS} lessons. Merge some and try again.")
+    parts = []
+    for lesson in lessons:
+        if not isinstance(lesson, list):
+            raise bad
+        part = []
+        for block in lesson:
+            if not (isinstance(block, list) and len(block) == 2 and all(isinstance(x, str) for x in block)):
+                raise bad
+            kind, text = block
+            kind = kind if kind in OWN_KINDS else "p"
+            text = re.sub(r"[^0-9A-Za-z]", "", text)[:12] if kind == "pg" else safe_inline(text).strip()
+            if text:
+                part.append((kind, text))
+        if any(k != "pg" for k, _ in part):
+            parts.append(part)
+    if not parts:
+        raise Problem(400, "We couldn't find any text in these lessons.")
+    return parts
 
 
 # --- Emails -----------------------------------------------------------------------------
@@ -398,22 +521,32 @@ def confirm_email(sub, book, n_parts):
     e = html.escape
     title, author = book["title"], book["author"]
     url = link(sub, "confirm")
-    inner = (f'<p style="{P}">You asked for <strong>{e(title)}</strong>{" by " + e(author) if author else ""}, '
-             f'{sub["pace"]} minutes every morning. That\'s {n_parts} parts.</p>'
+    if book.get("own"):
+        asked_html = f'You asked for <strong>{e(title)}</strong>, from the PDF you cut into {n_parts} parts'
+        asked_text = f"You asked for {title}, from the PDF you cut into {n_parts} parts"
+    else:
+        by = " by " + author if author else ""
+        asked_html = (f'You asked for <strong>{e(title)}</strong>{e(by)}, {sub["pace"]} minutes every morning. '
+                      f'That\'s {n_parts} parts')
+        asked_text = f"You asked for {title}{by}, {sub['pace']} minutes every morning ({n_parts} parts)"
+    inner = (f'<p style="{P}">{asked_html}.</p>'
              f'<p style="margin:24px 0"><a href="{e(url)}" style="{BUTTON}">Yes, start my drip</a></p>'
              f'<p style="{SMALL}">Part 1 arrives as soon as you confirm, then one part each morning.</p>'
-             f'<p style="{SMALL}">Didn\'t ask for this? Ignore this email and nothing happens.</p>')
-    text = (f"You asked for {title}{' by ' + author if author else ''}, {sub['pace']} minutes every morning "
-            f"({n_parts} parts).\n\nConfirm here to get part 1:\n{url}\n\n"
+             f'<p style="{SMALL}">Didn\'t ask for this? Ignore this email and nothing happens'
+             + (', and we delete the book in 7 days.' if book.get("own") else '.') + '</p>')
+    text = (f"{asked_text}.\n\nConfirm here to get part 1:\n{url}\n\n"
             "Didn't ask for this? Ignore this email and nothing happens.")
     return {"From": SENDER, "To": sub["email"], "Subject": f"Confirm your drip: {title}",
-            "HtmlBody": page(inner), "TextBody": text, "MessageStream": "outbound", "Tag": "confirm"}
+            "HtmlBody": page(inner), "TextBody": text, "MessageStream": "outbound", "Tag": "confirm",
+            "TrackOpens": False, "TrackLinks": "None"}
 
 
 def part_email(sub, book, parts, n, stream):
     e = html.escape
     title, part, total = book["title"], parts[n - 1], len(parts)
     w = where(book, parts, n)
+    source = ("From the PDF you sent us. We delete it 30 days after the last part." if book.get("own")
+              else "From the public-domain text.")
     if n < total:
         after_html = (f'<p style="{SMALL}">Part {n + 1} comes tomorrow morning. Can\'t wait? '
                       f'<a href="{e(link(sub, "next"))}" style="color:#666">Send me the next part now</a>.</p>')
@@ -426,10 +559,11 @@ def part_email(sub, book, parts, n, stream):
              + cut.to_html(part, BODY)
              + '<hr style="border:0;border-top:1px solid #ddd;margin:32px 0 16px">'
              + after_html
-             + f'<p style="{SMALL}">From the public-domain text. '
+             + f'<p style="{SMALL}">{source} '
                f'<a href="{{{{{{ pm:unsubscribe }}}}}}" style="color:#666">Unsubscribe</a></p>')
     text = (f"{header_text(w)}\n\n{cut.to_text(part)}\n\n---\n{after_text}\n\n"
             "Unsubscribe: {{{ pm:unsubscribe }}}")
     return {"From": SENDER, "To": sub["email"], "Subject": f"{title}, part {n} of {total}",
             "HtmlBody": page(inner), "TextBody": text, "MessageStream": stream, "Tag": "part",
+            "TrackOpens": False, "TrackLinks": "None",
             "Metadata": {"book": sub["book"], "part": str(n)}}

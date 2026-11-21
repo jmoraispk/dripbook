@@ -37,7 +37,7 @@
     <h1>How Dripbook works</h1>
     <p class="lede">Pick a book and a pace. Every morning, the next short part arrives in your inbox, until you've read every word.</p>
     <ol class="how-steps">
-      <li><h2>Pick a book</h2><p>Start any book in the library, or ask for one we don't have yet.</p></li>
+      <li><h2>Pick a book</h2><p>Start any book in the library, bring your own PDF, or ask for one we don't have yet.</p></li>
       <li><h2>Choose your pace</h2><p>Five, ten or twenty minutes a day, at the hour you like. Change it whenever you want.</p></li>
       <li><h2>Read each morning</h2><p>Every part ends at a natural break, never mid-scene. Want more? Each email links to the next part.</p></li>
     </ol>
@@ -51,6 +51,20 @@
       <a class="btn" href="/">Browse the library</a>
     </div>
     <ul class="fan" id="fan" aria-hidden="true"></ul>
+  </section>
+
+  <section class="how-part" id="own" aria-labelledby="own-title">
+    <div class="how-text">
+      <h2 id="own-title">Your own PDF, one part a day</h2>
+      <p>Got a PDF you keep meaning to read? Open it in our editor. It suggests a cut at every chapter; move the cuts, skip the pages you don't need, then send the lessons to your inbox, one each morning.</p>
+      <p>The PDF opens in your browser, and only the text of your lessons is sent to us. We keep it to send your drip and delete it 30 days after the last part. Use PDFs you have the right to read this way. <a href="privacy.html">Privacy</a></p>
+      <a class="btn" href="cuts?for=me">Upload your PDF</a>
+    </div>
+    <ol class="cutsheet" aria-hidden="true">
+      <li><span>Day 1</span><i></i><i></i><i></i><i></i></li>
+      <li><span>Day 2</span><i></i><i></i><i></i></li>
+      <li><span>Day 3</span><i></i><i></i><i></i><i></i><i></i></li>
+    </ol>
   </section>
 
   <section class="how-part ask" id="request" aria-labelledby="request-title">
@@ -76,6 +90,7 @@
       <input class="trap" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
       <button type="submit" class="btn">Request this book</button>
       <p class="note" id="request-note" role="status"></p>
+      <button type="button" class="btn quiet" id="request-again" hidden>Request another book</button>
     </form>
   </section>
 </main>

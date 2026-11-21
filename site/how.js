@@ -37,12 +37,29 @@
       })
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
-        if (r.ok) { say(data.message || 'Thanks. Your request is in.', 'ok'); form.elements.title.value = ''; form.elements.author.value = ''; form.elements.mine.checked = false; }
+        if (r.ok) {
+          say(data.message || 'Thanks. Your request is in.', 'ok');
+          form.classList.add('sent');
+          again.hidden = false;
+          again.focus();
+        }
         else say(data.error || "That didn't work. Try again in a minute.", 'err');
       });
     }).catch(function () {
       say("We couldn't reach Dripbook. Check your connection and try again.", 'err');
     }).then(function () { btn.disabled = false; });
+  });
+
+  // After a request, the form folds away; this brings it back empty, keeping the email.
+  var again = document.getElementById('request-again');
+  again.addEventListener('click', function () {
+    form.elements.title.value = '';
+    form.elements.author.value = '';
+    form.elements.mine.checked = false;
+    form.classList.remove('sent');
+    again.hidden = true;
+    say('');
+    form.elements.title.focus();
   });
 
   var bar = document.getElementById('bar');

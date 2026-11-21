@@ -146,6 +146,19 @@ label.btn,a.btn{display:inline-flex;align-items:center;cursor:pointer;text-decor
 .banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 20px;background:var(--ribbon-soft);border-bottom:1px solid var(--line);font-size:14px}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:12px;font-size:14px;max-width:min(680px,92vw);box-shadow:0 6px 24px rgba(20,27,51,.3);z-index:20}
 .toast a{color:var(--ribbon);font-weight:700}
+.mail{border:0;border-radius:16px;padding:0;width:min(440px,calc(100vw - 32px));box-shadow:0 18px 50px rgba(20,27,51,.35);color:var(--ink)}
+.mail::backdrop{background:rgba(20,27,51,.45)}
+.mail form{display:grid;gap:14px;padding:24px}
+.mail h2{font:600 22px/1.2 var(--serif);margin:0}
+.mail p{font-size:14px;color:var(--muted);line-height:1.5;margin:0}
+.mail .field{display:grid;gap:6px;font-size:14px;font-weight:600}
+.mail .field input{font:inherit;font-weight:400;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px}
+.mail .field input:focus{outline:2px solid var(--ribbon);outline-offset:1px;border-color:var(--ribbon)}
+.mail .rights{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.45}
+.mail .rights input{margin-top:3px;width:16px;height:16px;accent-color:var(--ink);flex:0 0 auto}
+.mail .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.mail .msg{min-height:1.4em;color:var(--ink)}
+.mail .msg.err{color:var(--red)}
 .toast code{font-family:var(--mono);font-size:12.5px;background:rgba(255,255,255,.12);border-radius:4px;padding:1px 5px;user-select:all}
 #selftest{position:fixed;right:12px;bottom:12px;z-index:30;background:#fff;border:2px solid var(--ink);border-radius:10px;padding:10px 14px;font:13px/1.5 var(--mono);white-space:pre;max-height:60vh;overflow:auto}
 
@@ -171,14 +184,15 @@ label.btn,a.btn{display:inline-flex;align-items:center;cursor:pointer;text-decor
   <label class="free" id="free-wrap" hidden>Free lessons <input type="number" id="free" min="1" max="99"></label>
   <button type="button" class="btn btn-primary" id="save" disabled hidden title="Save (Ctrl+S)">Save lessons.json</button>
   <a class="btn" id="send" hidden href="https://www.dropbox.com/request/dtds3axh71m4jur0v85d" target="_blank" rel="noopener" title="Opens our Dropbox upload page in a new tab">Send to Dripbook</a>
+  <button type="button" class="btn btn-primary" id="mail-me" hidden title="Get one lesson each morning by email">Email it to me</button>
 </header>
 <div class="banner" id="draft" hidden></div>
 <main>
   <section id="start">
     <div class="drop" id="drop">
       <h1>Cut your book into daily lessons</h1>
-      <p>Drop your book's PDF here. It opens in this browser and stays on your computer: nothing is uploaded. We start you off with one lesson per chapter, and you move the cuts wherever you like.</p>
-      <p>When you're happy, save your cuts and send them to us with your PDF. We email you a preview of every lesson before anything goes live.</p>
+      <p>Drop a PDF here. It opens in this browser and stays on your computer until you choose to send it. We start you off with one lesson per chapter, and you move the cuts wherever you like.</p>
+      <p>When you're happy, press <strong>Email it to me</strong> to get one lesson each morning. Wrote the book and want to sell it here? Save your cuts and send them to us with your PDF; we email you a preview of every lesson before anything goes live.</p>
       <div class="pick">
         <label id="pick-pdf"><strong>Book PDF</strong><span>Choose a file…</span><input type="file" accept="application/pdf,.pdf" id="in-pdf"></label>
         <label id="pick-plan"><strong>Saved cuts <em>(optional)</em></strong><span>A cuts.json you saved before; choose it first</span><input type="file" accept="application/json,.json" id="in-plan"></label>
@@ -197,6 +211,18 @@ label.btn,a.btn{display:inline-flex;align-items:center;cursor:pointer;text-decor
   </section>
 </main>
 <div class="toast" id="toast" hidden></div>
+<dialog class="mail" id="mail-dlg" aria-labelledby="mail-title">
+  <form method="dialog" id="mail-form">
+    <h2 id="mail-title">Email these lessons to me</h2>
+    <p id="mail-summary"></p>
+    <label class="field">Title <input id="mail-book" maxlength="200" required></label>
+    <label class="field">Your email <input id="mail-email" type="email" autocomplete="email" required></label>
+    <label class="rights"><input type="checkbox" id="mail-rights" required> <span>This PDF is mine to use this way: I wrote it, I own the rights, or I have permission.</span></label>
+    <p>We email you a link to confirm. Lesson 1 comes when you click it, then one each morning. We keep the text only to send it, and delete it 30 days after the last lesson. <a href="privacy.html" target="_blank" rel="noopener">Privacy</a></p>
+    <div class="actions"><button type="submit" class="btn btn-primary" id="mail-go">Start my drip</button><button type="button" class="btn" id="mail-cancel">Cancel</button></div>
+    <p class="msg" id="mail-msg" role="status"></p>
+  </form>
+</dialog>
 
 <script type="module">
 const C = window.DripbookCuts;
@@ -391,7 +417,9 @@ async function open(data, pdfName, jsonText) {
   status("");
   $("#start").hidden = true;
   for (const id of ["#tabs", "#free-wrap", "#undo", "#redo", "#save", "#split-long", "#open-cuts"]) $(id).hidden = false;
-  $("#send").hidden = mode !== "pdf";
+  $("#send").hidden = mode !== "pdf" || params.get("for") === "me";
+  $("#mail-me").hidden = mode !== "pdf";
+  if (params.get("for") === "me") $("#free-wrap").hidden = true;   // free lessons are for authors selling a book
   $("#free").value = S.plan.settings.free_lessons || 3;
   shownPages = "";
   buildOverview();
@@ -900,6 +928,71 @@ function renderEmail(el, seg, skip) {
     }).catch(console.error);
   }
 }
+
+// ------------------------------------------------------------------ email it to me
+
+// The lessons as the drip sends them (api/own.py): [[kind, html], ...] per lesson, text only.
+// A ["pg", n] marker goes before the first block on each new page, for the email's page range.
+function inlineHTML(b) {
+  return (b.runs || [[b.text || "", ""]]).map(([t, style]) => {
+    let h = esc(t);
+    if (style === "sup" || style === "sub") return `<${style}>${h}</${style}>`;
+    if (style.includes("b") && style !== "code") h = `<strong>${h}</strong>`;
+    if (style.includes("i")) h = `<em>${h}</em>`;
+    return h;
+  }).join("");
+}
+function emailLessons() {
+  let page = null;
+  return S.segs.filter((s) => s.kind === "lesson").map((seg) => {
+    const out = [];
+    for (let i = seg.a; i <= seg.b; i++) {
+      const b = S.blocks[i];
+      if (b.page && b.page !== page) { page = b.page; out.push(["pg", String(page)]); }
+      if (b.type === "heading") out.push([(b.level || 1) <= 1 ? "h2" : "h3", esc(b.text).replace(/\s+/g, " ")]);
+      else if (b.type === "code") out.push(["verse", esc(b.text)]);
+      else if (b.type === "list_item") out.push(["p", `${esc(b.marker)} ${inlineHTML(b)}`]);
+      else if (b.type === "figure") { if (b.caption) out.push(["note", esc(b.caption)]); }
+      else if (b.type === "footnote") out.push(["note", inlineHTML(b)]);
+      else out.push([b.quote ? "quote" : "p", inlineHTML(b)]);
+    }
+    return out;
+  });
+}
+function mailMsg(text, err) {
+  $("#mail-msg").textContent = text;
+  $("#mail-msg").className = "msg" + (err ? " err" : "");
+}
+$("#mail-me").onclick = () => {
+  const st = C.stats(S.blocks, S.segs);
+  $("#mail-summary").textContent = `${st.lessons} lessons of about ${st.median} minutes. Pictures stay out: emails carry the text.`;
+  $("#mail-book").value = S.plan.book?.title || S.pdfName.replace(/\.pdf$/i, "");
+  mailMsg("");
+  $("#mail-go").disabled = false;
+  $("#mail-dlg").showModal();
+  $("#mail-email").focus();
+};
+$("#mail-cancel").onclick = () => $("#mail-dlg").close();
+$("#mail-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#mail-go").disabled = true;
+  mailMsg("Sending…");
+  let tz = "";
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch {}
+  try {
+    const r = await fetch("/api/own", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({email: $("#mail-email").value, title: $("#mail-book").value, tz,
+                            rights: $("#mail-rights").checked, lessons: emailLessons()}),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) mailMsg(data.message || "Check your inbox for a link from Dripbook.");
+    else { mailMsg(data.error || (r.status === 413 ? "This book is too long to send in one go. Try a shorter PDF." : "That didn't work. Try again in a minute."), true); $("#mail-go").disabled = false; }
+  } catch {
+    mailMsg("We couldn't reach Dripbook. Check your connection and try again.", true);
+    $("#mail-go").disabled = false;
+  }
+});
 
 // ------------------------------------------------------------------ chrome
 

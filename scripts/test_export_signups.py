@@ -23,8 +23,10 @@ class Export(unittest.TestCase):
                                                 "sent": 0, "created": 1_000_000}))
         self.redis("SET", "who:a@x.com:7", "t0")
         self.redis("SET", "blocks:7", "zipped")
-        self.redis("HSET", ex.REQUESTS, "c@x.com|dune", json.dumps(
+        self.redis("RPUSH", ex.REQUESTS, json.dumps(
             {"title": "Dune", "author": "", "email": "c@x.com", "mine": False, "at": 3_000_000}))
+        self.redis("HSET", ex.OLD_REQUESTS, "d@x.com|emma", json.dumps(
+            {"title": "Emma", "author": "", "email": "d@x.com", "mine": True, "at": 2_500_000}))
 
     def test_subscribers_oldest_first_with_titles(self):
         rows = ex.subscribers(self.redis, LIBRARY)
@@ -39,9 +41,9 @@ class Export(unittest.TestCase):
                 mock.patch("builtins.print"):
             ex.main(["--out", out])
             with open(Path(out) / "requests.csv") as f:
-                self.assertEqual(list(csv.DictReader(f)),
-                                 [{"at": "1970-02-04 17:20", "title": "Dune", "author": "", "email": "c@x.com",
-                                   "mine": ""}])
+                rows = list(csv.DictReader(f))
+            self.assertEqual([(r["title"], r["mine"]) for r in rows], [("Emma", "yes"), ("Dune", "")])
+            self.assertEqual(rows[1]["at"], "1970-02-04 17:20")
             with open(Path(out) / "subscribers.csv") as f:
                 self.assertEqual(len(list(csv.DictReader(f))), 2)
 

@@ -19,7 +19,8 @@
 | The link opens a page that posts itself, so it's one click for the reader, but mail scanners that only follow links can't confirm. Without JavaScript the page shows a button. Part 1 goes out at once | `api/confirm.py` |
 | 06:00 UTC: each active reader who hasn't had a part today gets the next one, on stream `broadcast-1` | `api/cron.py`, `vercel.json` |
 | "Send me the next part now", the same pattern | `api/next.py` |
-| Book requests from How it works: one entry per reader and title in the `requests` hash. No email is sent | `site/how.js` → `api/request.py` |
+| Book requests from How it works: every request is its own entry in the `book-requests` list; only an identical one from the same IP within 10 minutes is dropped. No email is sent | `site/how.js` → `api/request.py` |
+| Your own PDF: the editor (`/cuts?for=me`) posts each lesson's text as blocks. It's stored as `own:{id}` and sent like any book: same confirmation, mornings and header. Kept until 30 days after the drip ends; at most 200 at once, 900 KB compressed each | `site/cuts.html` → `api/own.py` |
 | Unsubscribe: Postmark's link (`{{{ pm:unsubscribe }}}`). When Postmark refuses a send (406), the subscription stops | `drip/app.py` `send_next` |
 
 The cutter (`drip/cut.py`) works on blocks with Gutenberg's header, footer, credits, contents and illustrations already removed. Part 1 opens on chapter one when the title page, contents and preface before it are under 5% of the book (514 of 952 books). Longer openings are kept, because they're usually the author's own prologue, as in The Turn of the Screw. `KEEP_FRONT_MATTER` lists books whose short opening is worth reading too (Darwin's introduction, Gulliver's letters). The rest is cut at paragraph breaks into parts of 230 words × minutes, with a new part at a chapter heading once the current part is half full. Check a book with `python3 drip/cut.py public-domain/books/1342/pg1342.txt --pace 10`.

@@ -31,9 +31,18 @@ class FakeRedis:
         if cmd == "GET":
             return self.data.get(args[0])
         if cmd == "SET":
+            opts = [str(a).upper() for a in args[2:]]
+            if "NX" in opts and args[0] in self.data:
+                return None
             self.data[args[0]] = args[1]
-            self.ttl[args[0]] = int(args[3]) if len(args) > 3 else None
+            self.ttl[args[0]] = int(args[2 + opts.index("EX") + 1]) if "EX" in opts else None
             return "OK"
+        if cmd == "EXPIRE":
+            self.ttl[args[0]] = int(args[1])
+            return 1
+        if cmd == "PERSIST":
+            self.ttl[args[0]] = None
+            return 1
         if cmd == "SADD":
             self.data.setdefault(args[0], set()).add(args[1])
             return 1
@@ -42,15 +51,28 @@ class FakeRedis:
             return 1
         if cmd == "SMEMBERS":
             return list(self.data.get(args[0], set()))
+        if cmd == "RPUSH":
+            self.data.setdefault(args[0], []).append(args[1])
+            return len(self.data[args[0]])
+        if cmd == "LLEN":
+            return len(self.data.get(args[0], []))
+        if cmd == "LRANGE":
+            return list(self.data.get(args[0], []))
         if cmd == "HSET":
             self.data.setdefault(args[0], {})[args[1]] = args[2]
             return 1
-        if cmd == "HEXISTS":
-            return int(args[1] in self.data.get(args[0], {}))
-        if cmd == "HLEN":
-            return len(self.data.get(args[0], {}))
         if cmd == "HGETALL":
             return [x for kv in self.data.get(args[0], {}).items() for x in kv]
+        if cmd == "ZADD":
+            self.data.setdefault(args[0], {})[args[2]] = float(args[1])
+            return 1
+        if cmd == "ZREMRANGEBYSCORE":
+            z = self.data.get(args[0], {})
+            for k in [k for k, v in z.items() if v <= float(args[2])]:
+                del z[k]
+            return 1
+        if cmd == "ZCARD":
+            return len(self.data.get(args[0], {}))
         if cmd == "SCAN":   # one page; MATCH is a prefix followed by *
             prefix = args[2].rstrip("*")
             return ["0", [k for k in self.data if k.startswith(prefix)]]
@@ -194,19 +216,30 @@ class SubscribeTest(unittest.TestCase):
 
 
 class RequestTest(unittest.TestCase):
-    def test_saves_one_request_per_reader_and_title(self):
+    def saved(self, d):
+        return [json.loads(v) for v in d.redis.data.get(app.REQUESTS, [])]
+
+    def test_keeps_every_request(self):
         d, clock, _ = make()
-        out = d.request_book("  The   Road ", "Cormac McCarthy", " Me@X.com ")
+        out = d.request_book("  The   Road ", "Cormac McCarthy", " Me@X.com ", sender="1.2.3.4")
         self.assertEqual(out["status"], "saved")
         self.assertIn("The Road", out["message"])
         clock.now += 10
-        d.request_book("the road", "", "me@x.com", mine=True)
-        d.request_book("Dune", "", "me@x.com")
-        saved = {k: json.loads(v) for k, v in d.redis.data[app.REQUESTS].items()}
-        self.assertEqual(sorted(saved), ["me@x.com|dune", "me@x.com|the road"])
-        self.assertEqual(saved["me@x.com|the road"],
-                         {"title": "the road", "author": "", "email": "me@x.com", "mine": True, "at": 1_000_010})
+        d.request_book("The Road", "", "me@x.com", mine=True, sender="1.2.3.4")
+        d.request_book("The Road", "Cormac McCarthy", "me@x.com", sender="5.6.7.8")
+        self.assertEqual([(r["title"], r["author"], r["mine"]) for r in self.saved(d)],
+                         [("The Road", "Cormac McCarthy", False), ("The Road", "", True),
+                          ("The Road", "Cormac McCarthy", False)])
+        self.assertEqual(self.saved(d)[1]["at"], 1_000_010)
         self.assertEqual(d.mail.sent, [], "a request sends no email")
+
+    def test_an_identical_request_moments_later_is_dropped(self):
+        d, _, _ = make()
+        d.request_book("Dune", "", "a@b.co", sender="1.2.3.4")
+        out = d.request_book("Dune", "", "a@b.co", sender="1.2.3.4")
+        self.assertEqual(out["status"], "saved", "the reader still sees thanks")
+        self.assertEqual(len(self.saved(d)), 1)
+        self.assertEqual(d.redis.ttl[next(k for k in d.redis.data if k.startswith("request-seen:"))], 600)
 
     def test_rejects_bad_input(self):
         d, _, _ = make()
@@ -214,14 +247,85 @@ class RequestTest(unittest.TestCase):
             with self.assertRaises(Problem):
                 d.request_book(title, "", email)
 
-    def test_stops_taking_new_requests_when_full(self):
+    def test_stops_taking_requests_when_full(self):
         d, _, _ = make()
         d.request_book("Dune", "", "a@b.co")
         with mock.patch.object(app, "MAX_REQUESTS", 1):
             with self.assertRaises(Problem) as e:
                 d.request_book("Emma", "", "a@b.co")
-            self.assertEqual(e.exception.status, 503)
-            d.request_book("Dune", "Frank Herbert", "a@b.co")   # updating one is still fine
+        self.assertEqual(e.exception.status, 503)
+
+
+def lessons(n=3):
+    """What the cut editor posts: lessons as [[kind, html], ...]."""
+    para = " ".join(["word"] * 300)
+    return [[["h2", f"Chapter {i}"], ["pg", str(i * 10)], ["p", f"<em>{para}</em>"], ["quote", "A <b>quote</b>"]]
+            for i in range(1, n + 1)]
+
+
+class OwnTest(unittest.TestCase):
+    def start(self, d, **kw):
+        args = dict(email="Me@X.com", title="My Notes", lessons=lessons(), base="https://x", rights=True)
+        args.update(kw)
+        return d.subscribe_own(args.pop("email"), args.pop("title"), args.pop("lessons"), args.pop("base"),
+                               rights=args.pop("rights"))
+
+    def test_whole_drip_of_an_own_pdf(self):
+        d, clock, fetched = make()
+        out = self.start(d)
+        self.assertEqual(out["status"], "sent")
+        confirm = d.mail.sent[0]
+        self.assertIn("from the PDF you cut into 3 parts", confirm["TextBody"])
+        self.assertIs(confirm["TrackOpens"], False)
+        token = token_from(confirm, "confirm")
+        sub = d.get_sub(token)
+        book_key = sub["book"]
+        self.assertTrue(book_key.startswith("own:"))
+        self.assertEqual(d.redis.ttl[book_key], app.PENDING_SECONDS)
+
+        d.confirm(token)
+        self.assertIsNone(d.redis.ttl[book_key], "kept while the drip runs")
+        first = d.mail.sent[1]
+        self.assertEqual(first["Subject"], "My Notes, part 1 of 3")
+        self.assertIn("Chapter 1", first["HtmlBody"])
+        self.assertIn("Page 10", first["HtmlBody"])
+        self.assertIn("<em>word", first["HtmlBody"])
+        self.assertIn("A &lt;b&gt;quote&lt;/b&gt;", first["HtmlBody"], "other tags are shown as text")
+        self.assertIn("From the PDF you sent us", first["HtmlBody"])
+        for _ in range(2):
+            clock.date = clock.date[:-2] + str(int(clock.date[-2:]) + 1)
+            d.run_daily()
+        self.assertEqual(d.get_sub(token)["status"], "done")
+        self.assertEqual(d.redis.ttl[book_key], app.OWN_KEEP_SECONDS)
+        self.assertEqual(fetched, [], "nothing is fetched from Gutenberg")
+
+    def test_checks(self):
+        d, _, _ = make()
+        for kw, status in ((dict(rights=False), 400), (dict(email="nope"), 400), (dict(lessons=[]), 400),
+                           (dict(lessons=[[["p", 5]]]), 400), (dict(lessons=[[["pg", "3"]]]), 400)):
+            with self.assertRaises(Problem, msg=kw) as e:
+                self.start(d, **kw)
+            self.assertEqual(e.exception.status, status, kw)
+        self.start(d)
+        with self.assertRaises(Problem) as e:
+            self.start(d)
+        self.assertEqual(e.exception.status, 429)
+
+    def test_allowlist_and_ceiling(self):
+        d, _, _ = make(env={"ALLOWED_EMAILS": "@team.com"})
+        with self.assertRaises(Problem) as e:
+            self.start(d)
+        self.assertEqual(e.exception.status, 403)
+        d, _, _ = make()
+        with mock.patch.object(app, "MAX_OWN_BOOKS", 1):
+            self.start(d)
+            with self.assertRaises(Problem) as e:
+                self.start(d, email="b@x.com")
+        self.assertEqual(e.exception.status, 503)
+
+    def test_safe_inline(self):
+        self.assertEqual(app.safe_inline('<em>a</em> &amp; <script>x</script><strong>b'),
+                         "<em>a</em> &amp; &lt;script&gt;x&lt;/script&gt;<strong>b</strong>")
 
 
 class DripTest(unittest.TestCase):
@@ -316,7 +420,8 @@ class WebTest(unittest.TestCase):
                         "confirm": web.handler_for(get=web.confirm_get, post=web.confirm_post),
                         "next": web.handler_for(get=web.next_get, post=web.next_post),
                         "cron": web.handler_for(get=web.cron, kind=web.JSON),
-                        "request": web.handler_for(post=web.request_book, kind=web.JSON)}.items():
+                        "request": web.handler_for(post=web.request_book, kind=web.JSON),
+                        "own": web.handler_for(post=web.subscribe_own, kind=web.JSON, limit=2000)}.items():
             srv = HTTPServer(("127.0.0.1", 0), h)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             self.addCleanup(srv.server_close)
@@ -373,12 +478,20 @@ class WebTest(unittest.TestCase):
         status, body = self.call("request", json_body={"title": "Dune", "email": "a@b.co", "mine": True})
         self.assertEqual(status, 200, body)
         self.assertIn("set up Dune with you", json.loads(body)["message"])
-        self.assertTrue(json.loads(self.d.redis.data[app.REQUESTS]["a@b.co|dune"])["mine"])
+        self.assertTrue(json.loads(self.d.redis.data[app.REQUESTS][0])["mine"])
         status, body = self.call("request", json_body={"title": "", "email": "a@b.co"})
         self.assertEqual((status, json.loads(body)["error"]), (400, "Tell us the book's title."))
         status, _ = self.call("request", json_body={"title": "Spam", "email": "a@b.co", "website": "x.biz"})
         self.assertEqual(status, 200)
-        self.assertNotIn("a@b.co|spam", self.d.redis.data[app.REQUESTS], "the hidden field catches bots")
+        self.assertEqual(len(self.d.redis.data[app.REQUESTS]), 1, "the hidden field catches bots")
+
+    def test_own_pdf(self):
+        status, body = self.call("own", json_body={"email": "a@b.co", "title": "Mine", "rights": True,
+                                                   "lessons": [[["p", "Hello there."]]]})
+        self.assertEqual(status, 200, body)
+        self.assertIn("lesson 1", json.loads(body)["message"])
+        status, body = self.call("own", json_body={"email": "a@b.co", "lessons": [[["p", "x" * 3000]]]})
+        self.assertEqual(status, 413)
 
     def test_cron_needs_the_secret(self):
         with mock.patch.dict(os.environ, {"CRON_SECRET": "s3cret"}):
