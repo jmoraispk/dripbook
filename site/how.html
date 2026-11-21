@@ -59,7 +59,7 @@
       <p>Want a book that's still in copyright? Ask for it. We take every request to the author or publisher. When they agree, the book joins Dripbook on their terms, and we email you when it's ready.</p>
       <p>Wrote a book yourself? Ask for it here and tick the box. We'll get in touch to set it up with you. <a href="authors.html">More for authors</a></p>
     </div>
-    <form class="request" id="request-form" data-to="{{CONTACT_EMAIL}}">
+    <form class="request" id="request-form">
       <div class="field">
         <label for="r-title">Book title</label>
         <input id="r-title" name="title" required autocomplete="off" placeholder="The book you want to read">
@@ -73,6 +73,7 @@
         <input id="r-email" name="email" type="email" required autocomplete="email" placeholder="So we can tell you when it's ready">
       </div>
       <label class="check"><input type="checkbox" name="mine" id="r-mine"> I wrote this book</label>
+      <input class="trap" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
       <button type="submit" class="btn">Request this book</button>
       <p class="note" id="request-note" role="status"></p>
     </form>

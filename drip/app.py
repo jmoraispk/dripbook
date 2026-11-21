@@ -41,6 +41,9 @@ RESEND_SECONDS = 60
 MIN_WORDS = 500          # below this the "book" is a stub (music, scans), not a drip
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TIME_ZONE = re.compile(r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$")   # an IANA name like Europe/Lisbon
+# Book requests live in one Redis hash, one field per reader and title, so asking twice keeps one.
+REQUESTS = "requests"
+MAX_REQUESTS = 20_000    # a ceiling, so a flood of junk can't fill the database
 
 
 class Problem(Exception):
@@ -132,14 +135,15 @@ class Drip:
         self._books = {}
 
     @classmethod
-    def from_env(cls):
+    def from_env(cls, mail=True):
+        """From Vercel's env vars. mail=False for work that only touches the database."""
         env = os.environ
         url = env.get("KV_REST_API_URL") or env.get("UPSTASH_REDIS_REST_URL")
         token = env.get("KV_REST_API_TOKEN") or env.get("UPSTASH_REDIS_REST_TOKEN")
-        mail = env.get("POSTMARK_SERVER_TOKEN")
-        if not (url and token and mail):
+        key = env.get("POSTMARK_SERVER_TOKEN")
+        if not (url and token and (key or not mail)):
             raise Problem(503, "Sign-up isn't set up on this server yet.")
-        return cls(Redis(url, token), Postmark(mail))
+        return cls(Redis(url, token), Postmark(key) if key else None)
 
     # Storage
     def get_sub(self, token):
@@ -235,6 +239,26 @@ class Drip:
         self.save_sub(sub)
         self.redis("SADD", "active", sub["token"])
         return sub, self.send_next(sub)
+
+    # Book requests
+    def request_book(self, title, author, email, mine=False):
+        """Save a request for a book we don't have yet. Asking again for the same title updates it."""
+        title, author = " ".join(str(title or "").split()), " ".join(str(author or "").split())
+        email = str(email or "").strip().lower()
+        if not title:
+            raise Problem(400, "Tell us the book's title.")
+        if len(title) > 200 or len(author) > 200:
+            raise Problem(400, "That's longer than any title we know. Shorten it a little.")
+        if len(email) > 254 or not EMAIL.match(email):
+            raise Problem(400, "That email address doesn't look right.")
+        field = f"{email}|{title.lower()}"
+        if not self.redis("HEXISTS", REQUESTS, field) and int(self.redis("HLEN", REQUESTS) or 0) >= MAX_REQUESTS:
+            raise Problem(503, "We can't take requests right now. Try again tomorrow.")
+        self.redis("HSET", REQUESTS, field, json.dumps({
+            "title": title, "author": author, "email": email, "mine": bool(mine), "at": int(self.clock())}))
+        if mine:
+            return {"status": "saved", "message": f"Thanks. We'll write to {email} to set up {title} with you."}
+        return {"status": "saved", "message": f"Thanks. We'll ask for {title} and email {email} when it's here."}
 
     # Sending
     def send_next(self, sub):

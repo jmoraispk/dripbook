@@ -42,6 +42,20 @@ class FakeRedis:
             return 1
         if cmd == "SMEMBERS":
             return list(self.data.get(args[0], set()))
+        if cmd == "HSET":
+            self.data.setdefault(args[0], {})[args[1]] = args[2]
+            return 1
+        if cmd == "HEXISTS":
+            return int(args[1] in self.data.get(args[0], {}))
+        if cmd == "HLEN":
+            return len(self.data.get(args[0], {}))
+        if cmd == "HGETALL":
+            return [x for kv in self.data.get(args[0], {}).items() for x in kv]
+        if cmd == "SCAN":   # one page; MATCH is a prefix followed by *
+            prefix = args[2].rstrip("*")
+            return ["0", [k for k in self.data if k.startswith(prefix)]]
+        if cmd == "MGET":
+            return [self.data.get(k) for k in args]
         raise AssertionError(f"unexpected Redis command {cmd}")
 
 
@@ -179,6 +193,37 @@ class SubscribeTest(unittest.TestCase):
         self.assertEqual(e.exception.status, 502)
 
 
+class RequestTest(unittest.TestCase):
+    def test_saves_one_request_per_reader_and_title(self):
+        d, clock, _ = make()
+        out = d.request_book("  The   Road ", "Cormac McCarthy", " Me@X.com ")
+        self.assertEqual(out["status"], "saved")
+        self.assertIn("The Road", out["message"])
+        clock.now += 10
+        d.request_book("the road", "", "me@x.com", mine=True)
+        d.request_book("Dune", "", "me@x.com")
+        saved = {k: json.loads(v) for k, v in d.redis.data[app.REQUESTS].items()}
+        self.assertEqual(sorted(saved), ["me@x.com|dune", "me@x.com|the road"])
+        self.assertEqual(saved["me@x.com|the road"],
+                         {"title": "the road", "author": "", "email": "me@x.com", "mine": True, "at": 1_000_010})
+        self.assertEqual(d.mail.sent, [], "a request sends no email")
+
+    def test_rejects_bad_input(self):
+        d, _, _ = make()
+        for title, email in (("", "a@b.co"), ("x" * 201, "a@b.co"), ("Dune", "nope")):
+            with self.assertRaises(Problem):
+                d.request_book(title, "", email)
+
+    def test_stops_taking_new_requests_when_full(self):
+        d, _, _ = make()
+        d.request_book("Dune", "", "a@b.co")
+        with mock.patch.object(app, "MAX_REQUESTS", 1):
+            with self.assertRaises(Problem) as e:
+                d.request_book("Emma", "", "a@b.co")
+            self.assertEqual(e.exception.status, 503)
+            d.request_book("Dune", "Frank Herbert", "a@b.co")   # updating one is still fine
+
+
 class DripTest(unittest.TestCase):
     def setUp(self):
         self.d, self.clock, _ = make()
@@ -263,14 +308,15 @@ class WebTest(unittest.TestCase):
         quiet = mock.patch("http.server.BaseHTTPRequestHandler.log_message")
         quiet.start()
         self.addCleanup(quiet.stop)
-        patcher = mock.patch.object(web, "drip", lambda: self.d)
+        patcher = mock.patch.object(web, "drip", lambda mail=True: self.d)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.servers = {}
         for name, h in {"subscribe": web.handler_for(post=web.subscribe, kind=web.JSON),
                         "confirm": web.handler_for(get=web.confirm_get, post=web.confirm_post),
                         "next": web.handler_for(get=web.next_get, post=web.next_post),
-                        "cron": web.handler_for(get=web.cron, kind=web.JSON)}.items():
+                        "cron": web.handler_for(get=web.cron, kind=web.JSON),
+                        "request": web.handler_for(post=web.request_book, kind=web.JSON)}.items():
             srv = HTTPServer(("127.0.0.1", 0), h)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             self.addCleanup(srv.server_close)
@@ -322,6 +368,17 @@ class WebTest(unittest.TestCase):
         self.assertIn("expired", body)
         status, _ = self.call("subscribe")   # GET
         self.assertEqual(status, 405)
+
+    def test_book_request(self):
+        status, body = self.call("request", json_body={"title": "Dune", "email": "a@b.co", "mine": True})
+        self.assertEqual(status, 200, body)
+        self.assertIn("set up Dune with you", json.loads(body)["message"])
+        self.assertTrue(json.loads(self.d.redis.data[app.REQUESTS]["a@b.co|dune"])["mine"])
+        status, body = self.call("request", json_body={"title": "", "email": "a@b.co"})
+        self.assertEqual((status, json.loads(body)["error"]), (400, "Tell us the book's title."))
+        status, _ = self.call("request", json_body={"title": "Spam", "email": "a@b.co", "website": "x.biz"})
+        self.assertEqual(status, 200)
+        self.assertNotIn("a@b.co|spam", self.d.redis.data[app.REQUESTS], "the hidden field catches bots")
 
     def test_cron_needs_the_secret(self):
         with mock.patch.dict(os.environ, {"CRON_SECRET": "s3cret"}):

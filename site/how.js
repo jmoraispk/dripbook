@@ -16,23 +16,33 @@
     });
   }).catch(function () {});
 
-  // No server yet: the request opens an email to Dripbook, already filled in.
+  // Requests are saved by api/request.py; the export script lists them.
   var form = document.getElementById('request-form');
   var note = document.getElementById('request-note');
+  function say(text, state) {
+    note.textContent = text;
+    note.className = 'note' + (state ? ' ' + state : '');
+  }
   form.addEventListener('submit', function (e) {
     e.preventDefault();
-    var to = form.dataset.to;
-    if (!to || to.indexOf('{{') === 0) {
-      note.textContent = "Requests aren't open yet. Try again soon.";
-      return;
-    }
-    var title = form.title.value.trim(), author = form.author.value.trim(), email = form.email.value.trim();
-    var mine = form.mine.checked;
-    var subject = (mine ? 'Author request: ' : 'Book request: ') + title + (author ? ' by ' + author : '');
-    var body = 'Book: ' + title + '\nAuthor: ' + (author || 'not sure') + '\nEmail: ' + email +
-      (mine ? '\n\nI wrote this book and would like it on Dripbook.' : '');
-    location.href = 'mailto:' + to + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
-    note.textContent = 'Your email app should open with the request filled in. Send it and we’ll take it from there.';
+    var btn = form.querySelector('button');
+    btn.disabled = true;
+    say('Sending…');
+    fetch('/api/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: form.elements.title.value, author: form.elements.author.value, email: form.elements.email.value,
+        mine: form.elements.mine.checked, website: form.elements.website.value
+      })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (r.ok) { say(data.message || 'Thanks. Your request is in.', 'ok'); form.elements.title.value = ''; form.elements.author.value = ''; form.elements.mine.checked = false; }
+        else say(data.error || "That didn't work. Try again in a minute.", 'err');
+      });
+    }).catch(function () {
+      say("We couldn't reach Dripbook. Check your connection and try again.", 'err');
+    }).then(function () { btn.disabled = false; });
   });
 
   var bar = document.getElementById('bar');

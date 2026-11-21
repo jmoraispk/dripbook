@@ -87,14 +87,23 @@ def guarded(fn, kind):
     return run
 
 
-def drip():
-    return Drip.from_env()
+def drip(mail=True):
+    return Drip.from_env(mail)
 
 
 # --- Endpoints --------------------------------------------------------------------------
 def subscribe(req):
     data = req.data()
     out = drip().subscribe(data.get("email"), data.get("book"), data.get("pace"), req.base(), data.get("tz"))
+    return 200, JSON, json.dumps(out)
+
+
+def request_book(req):
+    data = req.data()
+    if data.get("website"):   # a field people never see: only bots fill it in
+        return 200, JSON, json.dumps({"status": "saved", "message": "Thanks."})
+    mine = str(data.get("mine", "")).lower() in ("1", "true", "on", "yes")
+    out = drip(mail=False).request_book(data.get("title"), data.get("author"), data.get("email"), mine)
     return 200, JSON, json.dumps(out)
 
 

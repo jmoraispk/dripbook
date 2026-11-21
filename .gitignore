@@ -7,3 +7,6 @@ converter/output/
 
 __pycache__/
 .vercel/
+# Exports and pulled env vars: readers' email addresses and database keys.
+exports/
+.env*
