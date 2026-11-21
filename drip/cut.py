@@ -5,9 +5,13 @@
   python3 drip/cut.py public-domain/books/1342/pg1342.txt --show 3        # print part 3 as HTML
   python3 drip/cut.py --all public-domain/books                           # check every book
 
-clean() strips Gutenberg's header, footer and illustration tags. cut() skips short
-front matter (title page, contents, preface) so part 1 opens on chapter one, then splits the
-text into parts of about WORDS_PER_MINUTE x pace words, at paragraph breaks,
+A book is a list of blocks, (kind, html): from Gutenberg's HTML edition (drip/gutenberg_html.py)
+or, failing that, from the plain text (clean() strips the header, footer and illustration tags;
+paragraphs() finds headings, verse and indented quotations). Kinds: h1..h4 (or h, a heading of
+unknown level), p, quote, verse, note, and pg (a printed page number, never shown).
+
+cut_blocks() skips short front matter (title page, contents, preface) so part 1 opens on chapter
+one, then splits the book into parts of about WORDS_PER_MINUTE x pace words, at paragraph breaks,
 starting a new part at a chapter heading when the current one is long enough.
 Cutting is deterministic, so part n of a book at a pace is always the same text.
 """
@@ -25,7 +29,7 @@ END = re.compile(r"^\*\*\* ?END OF (THE|THIS) PROJECT GUTENBERG.*$", re.M | re.I
 ILLUSTRATION = re.compile(r"\[(Illustration|Frontispiece)[^\]]*\]", re.I)
 CREDIT = re.compile(r"^(Produced by|E-?text prepared by|Transcribed from|This e-?book was)", re.I)
 FIRST = re.compile(r"^((CHAPTER|BOOK|PART|LETTER|STAVE|CANTO|VOLUME)\s+(I|1|ONE|FIRST)\b"
-                   r"|(BOOK|PART|VOLUME)\s+THE\s+FIRST\b|I\.?$)", re.I)
+                   r"|(BOOK|PART|VOLUME)\s+THE\s+FIRST\b|I\.?$|I\.\s+[A-Z])", re.I)
 # Front matter (title page, contents, a preface) is skipped only when chapter one starts in the
 # first 5% of the book. Past that it's often the author's own prologue (The Turn of the Screw).
 FRONT_MATTER_SHARE = 0.05
@@ -63,24 +67,41 @@ def metadata(raw):
     return field("Title"), field("Author")
 
 
+TAG = re.compile(r"<[^>]+>")
+
+
+def plain(text):
+    """A block's html as plain text."""
+    return html.unescape(TAG.sub("", text))
+
+
 def words(text):
-    return len(text.split())
+    return len(TAG.sub("", text).split())
+
+
+def is_heading(kind):
+    return kind[0] == "h"
 
 
 def paragraphs(text):
-    """Paragraph blocks: (kind, text). kind is 'h' (heading), 'verse' (keep line breaks) or 'p'."""
-    out = []
+    """Blocks from clean plain text. Lines indented by two or more spaces are a quotation or an
+    example set off from the text, unless most of the book is indented that way."""
+    raw = []
     for block in text.split("\n\n"):
         lines = [ln.rstrip() for ln in block.split("\n") if ln.strip()]
-        if not lines:
-            continue
+        if lines:
+            raw.append(lines)
+    indented = [all(re.match(r"^ {2,}\S", ln) for ln in lines) for lines in raw]
+    quotes_ok = sum(indented) < 0.4 * max(1, len(raw))
+    out = []
+    for lines, inset in zip(raw, indented):
         flat = re.sub(r"\s+", " ", " ".join(lines)).strip()
         if len(lines) <= 2 and words(flat) <= 12 and HEADING.match(flat):
-            out.append(("h", flat))
-        elif len(lines) > 1 and max(len(ln) for ln in lines[:-1]) < 55:
-            out.append(("verse", "\n".join(ln.strip() for ln in lines)))
+            out.append(("h", inline(flat)))
+        elif len(lines) > 1 and max(len(ln.strip()) for ln in lines[:-1]) < 55:
+            out.append(("verse", "\n".join(inline(ln.strip()) for ln in lines)))
         else:
-            out.append(("p", flat))
+            out.append(("quote" if inset and quotes_ok else "p", inline(flat)))
     return out
 
 
@@ -91,8 +112,10 @@ def split_long(block, size):
     pieces, cur = [], []
     for s in sentences:
         cur.append(s)
-        if words(" ".join(cur)) >= size:
-            pieces.append((kind, " ".join(cur)))
+        joined = " ".join(cur)
+        # Never split inside <em>...</em>: the piece would open a tag the next one closes.
+        if words(joined) >= size and all(joined.count(f"<{t}>") == joined.count(f"</{t}>") for t in ("em", "strong")):
+            pieces.append((kind, joined))
             cur = []
     if cur:
         pieces.append((kind, " ".join(cur)))
@@ -111,42 +134,47 @@ def story_start(blocks):
         if seen > FRONT_MATTER_SHARE * total:
             break
         seen += words(text)
-        if kind != "h" or not FIRST.match(text):
+        if not is_heading(kind) or not FIRST.match(plain(text)):
             continue
         after, j = 0, i + 1
-        while j < len(blocks) and blocks[j][0] != "h" and after < 150:
+        while j < len(blocks) and not is_heading(blocks[j][0]) and after < 150:
             after += words(blocks[j][1])
             j += 1
         if after >= 150:
-            while i > 0 and blocks[i - 1][0] == "h" and FIRST.match(blocks[i - 1][1]):
+            while i > 0 and (blocks[i - 1][0] == "pg" or is_heading(blocks[i - 1][0])
+                             and FIRST.match(plain(blocks[i - 1][1]))):
                 i -= 1
             return i
     return 0
 
 
 def cut(text, pace, skip_front=True):
-    """Split clean text into parts, each a list of (kind, text) blocks, from chapter one on."""
+    """Split clean plain text into parts. See cut_blocks()."""
+    return cut_blocks(paragraphs(text), pace, skip_front)
+
+
+def cut_blocks(found, pace, skip_front=True):
+    """Split a book's blocks into parts, each a list of (kind, html) blocks, from chapter one on."""
     target = WORDS_PER_MINUTE * pace
     blocks = []
-    found = paragraphs(text)
     for b in found[story_start(found) if skip_front else 0:]:
         blocks.extend(split_long(b, target) if words(b[1]) > 1.5 * target else [b])
 
     parts, cur, n = [], [], 0
     for b in blocks:
         w = words(b[1])
-        new_chapter = b[0] == "h" and n >= 0.5 * target
+        new_chapter = is_heading(b[0]) and n >= 0.5 * target
         too_long = n + w > 1.2 * target and n >= 0.6 * target
         if cur and (new_chapter or too_long):
             parts.append(cur)
             cur, n = [], 0
         cur.append(b)
         n += w
-        if n >= target and b[0] != "h":
+        if n >= target and not is_heading(b[0]) and b[0] != "pg":
             parts.append(cur)
             cur, n = [], 0
     if cur:
-        if parts and (n < 0.3 * target or all(k == "h" for k, _ in cur)):
+        if parts and (n < 0.3 * target or all(is_heading(k) or k == "pg" for k, _ in cur)):
             parts[-1].extend(cur)
         else:
             parts.append(cur)
@@ -158,29 +186,98 @@ def part_words(part):
 
 
 def part_heading(part):
-    """The first heading in a part, for the email's subtitle; '' if there is none."""
-    return next((t for k, t in part if k == "h"), "")
+    """The first heading in a part, as plain text; '' if there is none."""
+    return next((plain(t) for k, t in part if is_heading(k)), "")
+
+
+def level(kind):
+    return int(kind[1]) if len(kind) == 2 else 2
+
+
+def context(parts, n, title=""):
+    """Where part n (1-based) sits in the book: {'trail': [headings], 'pages': (first, last)}.
+
+    trail is the chapter and section open where the part's reading starts, outermost first,
+    leaving out the book's own title. pages are the printed pages it covers, or None when the
+    edition has no page numbers. A page number comes right after the block it starts in.
+    """
+    def take(kind, text):
+        nonlocal heads
+        heads = {lv: t for lv, t in heads.items() if lv < level(kind)}
+        heads[level(kind)] = plain(text)
+
+    heads, page = {}, None
+    for part in parts[:n - 1]:
+        for kind, text in part:
+            if kind == "pg":
+                page = text
+            elif is_heading(kind):
+                take(kind, text)
+    first, last, reading = page, page, False
+    for kind, text in parts[n - 1]:
+        if kind == "pg":
+            if not reading:
+                first = text   # the part opens on a new page
+            last = text
+        elif is_heading(kind):
+            if not reading:
+                take(kind, text)
+        else:
+            reading = True
+    # A page number between two parts usually marks a page that began inside this part's last
+    # paragraph (gutenberg_html moves numbers found mid-paragraph to after it).
+    for kind, text in parts[n] if n < len(parts) else []:
+        if kind != "pg":
+            break
+        last = text
+    simple = lambda t: re.sub(r"[^a-z0-9]", "", t.lower())
+    trail = [t for _, t in sorted(heads.items()) if simple(t) and simple(t) != simple(title)]
+    return {"trail": trail[-2:], "pages": (first, last) if first and last else None}
 
 
 def inline(text):
-    """Escape, then turn Gutenberg's _underscores_ into italics."""
+    """Escape plain text, then turn Gutenberg's _underscores_ into italics."""
     return re.sub(r"_([^_\n]+)_", r"<em>\1</em>", html.escape(text, quote=False))
 
 
-def to_html(part, p_style="", h_style=""):
-    out = []
+def to_html(part, styles=None):
+    """A part as email html. styles maps a kind (p, h, h3, quote, verse, note) to inline CSS."""
+    st = styles or {}
+    out, quote = [], []
+
+    def end_quote():
+        if quote:
+            out.append(f'<blockquote style="{st.get("blockquote", "")}">' + "".join(quote) + "</blockquote>")
+            quote.clear()
+
     for kind, text in part:
-        if kind == "h":
-            out.append(f'<h2 style="{h_style}">{inline(text)}</h2>')
+        if kind == "pg":
+            continue
+        if kind == "quote":
+            quote.append(f'<p style="{st.get("quote", "")}">{text}</p>')
+            continue
+        end_quote()
+        if is_heading(kind):
+            tag = "h2" if level(kind) <= 2 else "h3"
+            out.append(f'<{tag} style="{st.get(tag, "")}">{text}</{tag}>')
         elif kind == "verse":
-            out.append(f'<p style="{p_style}">{inline(text).replace(chr(10), "<br>")}</p>')
+            out.append(f'<p style="{st.get("verse", "")}">{text.replace(chr(10), "<br>")}</p>')
+        elif kind == "note":
+            out.append(f'<p style="{st.get("note", "")}">{text}</p>')
         else:
-            out.append(f'<p style="{p_style}">{inline(text)}</p>')
+            out.append(f'<p style="{st.get("p", "")}">{text}</p>')
+    end_quote()
     return "\n".join(out)
 
 
 def to_text(part):
-    return "\n\n".join(t for _, t in part)
+    out = []
+    for kind, text in part:
+        if kind == "pg":
+            continue
+        t = plain(text)
+        out.append("    " + t.replace("\n", "\n    ") if kind in ("quote", "verse") else t)
+    return "\n\n".join(out)
 
 
 def main(argv=None):

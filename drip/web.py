@@ -1,8 +1,9 @@
 """HTTP side of the drip: the Vercel Python functions in api/ are thin wrappers around these.
 
 Each endpoint takes a Request and returns (status, content_type, body). Links in emails
-open a page with a button that POSTs, so mail scanners that follow links can't confirm
-a sign-up or send a part.
+open a page that POSTs, so mail scanners that only follow links can't confirm a sign-up or
+send a part. The page posts itself as soon as it opens in a browser, so for the reader it's
+one click; without JavaScript it shows the button.
 """
 import html
 import json
@@ -46,10 +47,13 @@ class Request:
         return f"{proto}://{host}"
 
 
-def page(title, text, button=None, token=""):
-    """A small page in the site's look. button posts the token back to the same URL."""
-    form = (f'<form method="post"><input type="hidden" name="t" value="{html.escape(token)}">'
+def page(title, text, button=None, token="", auto=False):
+    """A small page in the site's look. button posts the token back to the same URL;
+    with auto, the page posts it by itself as soon as it opens."""
+    form = (f'<form method="post" id="go"><input type="hidden" name="t" value="{html.escape(token)}">'
             f'<button class="btn" type="submit">{html.escape(button)}</button></form>') if button else ""
+    if form and auto:
+        form += '<script>document.getElementById("go").submit()</script>'
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -95,8 +99,8 @@ def subscribe(req):
 
 
 def confirm_get(req):
-    return 200, HTML, page("One click to start", "Confirm, and part 1 is in your inbox in a minute.",
-                           "Start my drip", req.query.get("t", ""))
+    return 200, HTML, page("Starting your drip", "One moment. If nothing happens, press the button.",
+                           "Start my drip", req.query.get("t", ""), auto=True)
 
 
 def confirm_post(req):
@@ -112,8 +116,8 @@ def confirm_post(req):
 
 
 def next_get(req):
-    return 200, HTML, page("Read ahead?", "We'll send your next part right now. Tomorrow's still comes as usual.",
-                           "Send me the next part", req.query.get("t", ""))
+    return 200, HTML, page("Sending your next part", "One moment. If nothing happens, press the button.",
+                           "Send me the next part", req.query.get("t", ""), auto=True)
 
 
 def next_post(req):

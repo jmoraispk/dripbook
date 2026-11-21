@@ -4,11 +4,12 @@ State lives in Upstash Redis (REST API), email goes through Postmark:
   sub:{token}           JSON subscription: email, book, pace, tz, status, sent, last_day, base
   who:{email}:{book}    token of that reader's subscription to that book
   active                set of tokens that get a part every morning
-  book:{id}             the clean text of a book (gzip, base64), fetched once from Gutenberg's mirror
+  blocks:{id}           a book as cut.py blocks (JSON, gzip, base64), read once from Gutenberg's mirror:
+                        the HTML edition, or the plain text when the HTML is missing or garbled
 
 A subscription is 'pending' until its link is confirmed (kept 7 days), then 'active'
 until the last part ('done') or until Postmark says the reader unsubscribed ('stopped').
-Parts are cut on the fly from the cached text (drip/cut.py is deterministic and fast).
+Parts are cut on the fly from the cached blocks (drip/cut.py is deterministic and fast).
 """
 import base64
 import gzip
@@ -24,10 +25,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import cut
+import gutenberg_html
 
 ROOT = Path(__file__).resolve().parent.parent
 LIBRARY = ROOT / "site" / "library.json"
 MIRROR = "https://gutenberg.pglaf.org/cache/epub/{id}/pg{id}.txt"
+MIRROR_HTML = "https://gutenberg.pglaf.org/cache/epub/{id}/pg{id}-images.html"
+# The HTML edition is used only if it has about as many words as the plain text; a few books
+# keep their text in tables or images, or carry a big index the text leaves out.
+HTML_WORDS = (0.85, 1.15)
 POSTMARK_API = "https://api.postmarkapp.com/email"
 SENDER = "Dripbook <lessons@mail.dripbook.ai>"
 PENDING_SECONDS = 7 * 24 * 3600
@@ -80,10 +86,30 @@ class Postmark:
                 return json.load(e)
 
 
-def fetch_gutenberg(book_id):
-    req = urllib.request.Request(MIRROR.format(id=book_id), headers={"User-Agent": "dripbook/0.1"})
+def fetch_gutenberg(book_id, url=MIRROR):
+    req = urllib.request.Request(url.format(id=book_id), headers={"User-Agent": "dripbook/0.1"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         return resp.read().decode("utf-8", errors="replace")
+
+
+def fetch_gutenberg_html(book_id):
+    return fetch_gutenberg(book_id, MIRROR_HTML)
+
+
+def read_book(text, page=None):
+    """A book's blocks: from its HTML edition (page) when that reads cleanly, else from the text."""
+    plain = cut.paragraphs(cut.clean(text))
+    if page:
+        try:
+            rich = gutenberg_html.blocks(page)
+        except Exception as e:  # html.parser is forgiving; anything that still breaks it is a bad page
+            print(f"HTML edition unreadable: {e!r}")
+            rich = []
+        n_plain = sum(cut.words(t) for _, t in plain)
+        n_rich = sum(cut.words(t) for _, t in rich)
+        if n_plain and HTML_WORDS[0] <= n_rich / n_plain <= HTML_WORDS[1]:
+            return rich
+    return plain
 
 
 def load_library():
@@ -96,8 +122,9 @@ def today():
 
 # --- The drip ---------------------------------------------------------------------------
 class Drip:
-    def __init__(self, redis, mail, env=None, fetch=fetch_gutenberg, library=None, clock=time.time, day=today):
-        self.redis, self.mail, self.fetch = redis, mail, fetch
+    def __init__(self, redis, mail, env=None, fetch=fetch_gutenberg, library=None, clock=time.time, day=today,
+                 fetch_html=fetch_gutenberg_html):
+        self.redis, self.mail, self.fetch, self.fetch_html = redis, mail, fetch, fetch_html
         self.env = os.environ if env is None else env
         self.library = load_library() if library is None else library
         self.clock, self.day = clock, day
@@ -126,27 +153,33 @@ class Drip:
             self.redis("SET", k, v, "EX", expire) if expire else self.redis("SET", k, v)
 
     def book(self, book_id):
-        """{'title', 'author', 'text'} for a book, from the cache or Gutenberg's mirror."""
+        """{'title', 'author', 'blocks'} for a book, from the cache or Gutenberg's mirror."""
         if book_id in self._books:
             return self._books[book_id]
         info = self.library[book_id]
-        raw = self.redis("GET", f"book:{book_id}")
+        raw = self.redis("GET", f"blocks:{book_id}")
         if raw:
-            text = gzip.decompress(base64.b64decode(raw)).decode("utf-8")
+            blocks = [tuple(b) for b in json.loads(gzip.decompress(base64.b64decode(raw)))]
         else:
             try:
-                text = cut.clean(self.fetch(book_id))
+                text = self.fetch(book_id)
             except (OSError, ValueError) as e:
                 raise Problem(502, "We couldn't load this book just now. Try again in a minute.") from e
-            if cut.words(text) < MIN_WORDS:
+            try:
+                page = self.fetch_html(book_id) if self.fetch_html else None
+            except (OSError, ValueError):
+                page = None
+            blocks = read_book(text, page)
+            if sum(cut.words(t) for _, t in blocks) < MIN_WORDS:
                 raise Problem(422, "This one isn't available as a drip. Try another book.")
-            self.redis("SET", f"book:{book_id}", base64.b64encode(gzip.compress(text.encode("utf-8"))).decode())
-        book = {"title": info["title"], "author": info.get("author", ""), "text": text}
+            packed = gzip.compress(json.dumps(blocks, separators=(",", ":")).encode("utf-8"), 9)
+            self.redis("SET", f"blocks:{book_id}", base64.b64encode(packed).decode())
+        book = {"title": info["title"], "author": info.get("author", ""), "blocks": blocks}
         self._books[book_id] = book
         return book
 
     def parts(self, sub):
-        return cut.cut(self.book(sub["book"])["text"], sub["pace"], sub["book"] not in cut.KEEP_FRONT_MATTER)
+        return cut.cut_blocks(self.book(sub["book"])["blocks"], sub["pace"], sub["book"] not in cut.KEEP_FRONT_MATTER)
 
     # Sign-up
     def allowed(self, email):
@@ -259,11 +292,73 @@ class Drip:
 
 # --- Emails -----------------------------------------------------------------------------
 FONT = "font-family:Georgia,'Times New Roman',serif"
+SANS = "font-family:Helvetica,Arial,sans-serif"
 P = f"margin:0 0 1em;{FONT};font-size:18px;line-height:1.6;color:#222"
 H = f"margin:1.6em 0 .8em;{FONT};font-size:22px;line-height:1.3;color:#111"
-SMALL = "margin:0 0 1em;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#666"
+SMALL = f"margin:0 0 1em;{SANS};font-size:14px;line-height:1.5;color:#666"
 BUTTON = ("display:inline-block;padding:12px 22px;border-radius:999px;background:#F2B230;color:#1a1300;"
-          "font-family:Helvetica,Arial,sans-serif;font-weight:bold;text-decoration:none")
+          f"{SANS};font-weight:bold;text-decoration:none")
+BODY = {
+    "p": P,
+    "h2": H,
+    "h3": f"margin:1.5em 0 .7em;{FONT};font-size:19px;line-height:1.35;font-weight:bold;color:#111",
+    "blockquote": "margin:0 0 1em;padding:.15em 0 .15em 18px;border-left:3px solid #E9D9A8",
+    "quote": f"margin:.4em 0;{FONT};font-size:17px;line-height:1.55;color:#333",
+    "verse": f"margin:0 0 1em 1.4em;{FONT};font-size:18px;line-height:1.55;color:#222",
+    "note": f"margin:0 0 1em;{FONT};font-size:15px;line-height:1.5;color:#555",
+}
+ROMAN = re.compile(r"^[IVXLC]+[.:]?$")
+SMALL_WORDS = {"a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "into", "nor", "of", "on", "or",
+               "the", "to", "with"}
+
+
+def tidy(heading, limit=80):
+    """A heading for the email's header line: ALL CAPS softened to title case, long ones cut."""
+    letters = [c for c in heading if c.isalpha()]
+    if len(letters) > 3 and all(c.isupper() for c in letters):
+        words = heading.split()
+        heading = " ".join(w if ROMAN.match(w) else w.lower() if i and w.lower() in SMALL_WORDS
+                           else w[:1] + w[1:].lower() for i, w in enumerate(words))
+    return heading if len(heading) <= limit else heading[:limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def where(book, parts, n):
+    """The lines that open a part's email: book and part, chapter and section, pages and time."""
+    ctx = cut.context(parts, n, book["title"])
+    total = len(parts)
+    minutes = max(1, round(cut.part_words(parts[n - 1]) / cut.WORDS_PER_MINUTE))
+    last_page = next((t for part in reversed(parts) for k, t in reversed(part) if k == "pg"), None)
+    if ctx["pages"]:
+        first, last = ctx["pages"]
+        pages = f"Page {first}" if first == last else f"Pages {first}–{last}"
+        if last_page and last_page.isdigit():
+            pages += f" of {last_page}"
+    else:
+        done = sum(cut.part_words(x) for x in parts[:n - 1])
+        pages = f"{round(100 * done / max(1, done + sum(cut.part_words(x) for x in parts[n - 1:])))}% through"
+    return {"top": f"{book['title']} · Part {n} of {total}",
+            "trail": [tidy(t) for t in ctx["trail"]],
+            "meta": f"{pages} · {minutes} min read",
+            "progress": n / total}
+
+
+def header_html(w):
+    e = html.escape
+    trail = " <span style=\"color:#B89A4E\">›</span> ".join(e(t) for t in w["trail"])
+    filled = max(2, round(100 * w["progress"]))
+    bar = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:10px 0 0">'
+           f'<tr><td width="{filled}%" style="height:4px;background:#F2B230;font-size:0;line-height:0">&nbsp;</td>'
+           + (f'<td style="height:4px;background:#F1EBDA;font-size:0;line-height:0">&nbsp;</td>' if filled < 100 else "")
+           + "</tr></table>")
+    return (f'<p style="margin:0;{SANS};font-size:13px;line-height:1.5;color:#8A8577">{e(w["top"])}</p>'
+            + (f'<p style="margin:6px 0 0;{FONT};font-size:17px;line-height:1.4;color:#1a1a1a">{trail}</p>'
+               if trail else "")
+            + f'<p style="margin:6px 0 0;{SANS};font-size:13px;line-height:1.5;color:#8A8577">{e(w["meta"])}</p>'
+            + bar + '<div style="height:28px;line-height:28px;font-size:0">&nbsp;</div>')
+
+
+def header_text(w):
+    return "\n".join([w["top"]] + ([" › ".join(w["trail"])] if w["trail"] else []) + [w["meta"]])
 
 
 def page(inner):
@@ -294,8 +389,7 @@ def confirm_email(sub, book, n_parts):
 def part_email(sub, book, parts, n, stream):
     e = html.escape
     title, part, total = book["title"], parts[n - 1], len(parts)
-    minutes = max(1, round(cut.part_words(part) / cut.WORDS_PER_MINUTE))
-    head = f"{title} · Part {n} of {total} · {minutes} min"
+    w = where(book, parts, n)
     if n < total:
         after_html = (f'<p style="{SMALL}">Part {n + 1} comes tomorrow morning. Can\'t wait? '
                       f'<a href="{e(link(sub, "next"))}" style="color:#666">Send me the next part now</a>.</p>')
@@ -304,15 +398,14 @@ def part_email(sub, book, parts, n, stream):
         after_html = (f'<p style="{SMALL}">That\'s the end of {e(title)}. '
                       f'<a href="{e(sub["base"])}/" style="color:#666">Pick your next book</a>.</p>')
         after_text = f"That's the end of {title}. Pick your next book: {sub['base']}/"
-    inner = (f'<p style="{SMALL}">{e(head)}</p>'
-             + cut.to_html(part, P, H)
+    inner = (header_html(w)
+             + cut.to_html(part, BODY)
              + '<hr style="border:0;border-top:1px solid #ddd;margin:32px 0 16px">'
              + after_html
              + f'<p style="{SMALL}">From the public-domain text. '
                f'<a href="{{{{{{ pm:unsubscribe }}}}}}" style="color:#666">Unsubscribe</a></p>')
-    text = (f"{head}\n\n{cut.to_text(part)}\n\n---\n{after_text}\n\n"
+    text = (f"{header_text(w)}\n\n{cut.to_text(part)}\n\n---\n{after_text}\n\n"
             "Unsubscribe: {{{ pm:unsubscribe }}}")
     return {"From": SENDER, "To": sub["email"], "Subject": f"{title}, part {n} of {total}",
             "HtmlBody": page(inner), "TextBody": text, "MessageStream": stream, "Tag": "part",
             "Metadata": {"book": sub["book"], "part": str(n)}}
-

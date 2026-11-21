@@ -59,16 +59,32 @@ class Clock:
         self.now, self.date = 1_000_000, "2026-11-16"
 
 
-def make(env=None):
+def make(env=None, page=None):
+    """A Drip on fakes. page is the HTML edition the mirror serves for book 7 (none by default)."""
     clock = Clock()
     fetched = []
 
     def fetch(book_id):
         fetched.append(book_id)
         return BOOK if book_id == "7" else "*** START OF THE PROJECT GUTENBERG EBOOK S ***\n\nMusic files.\n"
+
+    def fetch_html(book_id):
+        if page is None or book_id != "7":
+            raise OSError("404")
+        return page
     d = Drip(FakeRedis(), FakeMail(), env=env or {}, fetch=fetch, library=LIBRARY,
-             clock=lambda: clock.now, day=lambda: clock.date)
+             clock=lambda: clock.now, day=lambda: clock.date, fetch_html=fetch_html)
     return d, clock, fetched
+
+
+def html_edition(words_per_para=100):
+    """Book 7 as Gutenberg's HTML edition, with headings, an example and page numbers."""
+    para = " ".join(["word"] * words_per_para)
+    return ("<html><body><header id='pg-header'><p>Licence</p></header>"
+            + "".join(f"<span class='pagenum'>{{{c}}}</span><h2>CHAPTER {c}.</h2>"
+                      + "".join(f"<p>{para}</p>" for _ in range(11))
+                      + f"<div class='example'><p>{para}</p></div>" for c in range(1, 4))
+            + "</body></html>")
 
 
 def token_from(message, action):
@@ -127,8 +143,21 @@ class SubscribeTest(unittest.TestCase):
         d, _, fetched = make()
         d.subscribe("a@b.co", "7", 5, "https://x")
         d2 = Drip(d.redis, d.mail, env={}, fetch=None, library=LIBRARY)
-        self.assertEqual(d2.book("7")["text"], d.book("7")["text"])
+        self.assertEqual(d2.book("7")["blocks"], d.book("7")["blocks"])
         self.assertEqual(fetched, ["7"])
+
+    def test_html_edition_is_preferred_when_it_matches_the_text(self):
+        d, _, _ = make(page=html_edition())
+        kinds = {k for k, _ in d.book("7")["blocks"]}
+        self.assertTrue({"pg", "quote", "h2"} <= kinds, kinds)
+        d.subscribe("a@b.co", "7", 5, "https://x")
+        d.confirm(token_from(d.mail.sent[0], "confirm"))
+        self.assertIn("Pages 1–2 of 3", d.mail.sent[-1]["TextBody"])
+        self.assertIn("<blockquote", d.mail.sent[-1]["HtmlBody"])
+
+    def test_plain_text_when_the_html_edition_is_short(self):
+        d, _, _ = make(page=html_edition(words_per_para=10))
+        self.assertNotIn("pg", {k for k, _ in d.book("7")["blocks"]})
 
     def test_resend_is_rate_limited_and_keeps_the_token(self):
         d, clock, _ = make()
@@ -167,6 +196,9 @@ class DripTest(unittest.TestCase):
         self.assertIn("{{{ pm:unsubscribe }}}", part1["TextBody"])
         self.assertIn(f"https://x/api/next?t={self.token}", part1["TextBody"])
         self.assertIn("CHAPTER 1.", part1["HtmlBody"])
+        self.assertIn("A Test &amp; Book · Part 1 of 3", part1["HtmlBody"])
+        self.assertIn("Chapter 1.", part1["TextBody"].splitlines()[1], "the chapter is named at the top")
+        self.assertIn("0% through · ", part1["TextBody"])
         self.assertIsNone(d.redis.ttl[f"sub:{self.token}"], "confirmed subscriptions don't expire")
 
         self.assertEqual(d.confirm(self.token)[1], "already")
@@ -271,6 +303,7 @@ class WebTest(unittest.TestCase):
         status, body = self.call("confirm", f"?t={token}")
         self.assertEqual(status, 200)
         self.assertIn('method="post"', body)
+        self.assertIn('getElementById("go").submit()', body, "a browser posts the form by itself")
         self.assertEqual(len(self.d.mail.sent), 1, "opening the link alone sends nothing")
 
         status, body = self.call("confirm", data=f"t={token}")

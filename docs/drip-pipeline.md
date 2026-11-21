@@ -5,7 +5,9 @@
 ## Decisions
 
 - **Storage: Upstash Redis** (Vercel Marketplace, free plan). It has a REST API, so the functions need only Python's standard library: no driver, no `requirements.txt`, no schema. The data is key-value anyway. The free plan (256 MB, 500K commands a month) covers the trial with lots of room.
-- **Parts are cut when they're sent, not ahead of time.** The first time someone picks a book, its text comes from Gutenberg's own mirror (the same file as in `public-domain/books/`), is cleaned once and cached in Redis, gzipped (about 300 KB a book). Cutting it again for each send takes milliseconds, and it always gives the same parts. Precomputing would mean uploading 958 books × 3 paces to Blob again every time the cutter changes.
+- **Parts are cut when they're sent, not ahead of time.** The first time someone picks a book, it's read from Gutenberg's own mirror, split into blocks once and cached in Redis, gzipped (about 300 KB a book). Cutting it again for each send takes milliseconds, and it always gives the same parts. Precomputing would mean uploading 958 books × 3 paces to Blob again every time the cutter changes.
+- **Parts come from the HTML edition**, so emails keep headings, set-off examples and quotations, verse, italics and the printed page numbers (`drip/gutenberg_html.py`). The plain text is the fallback when the HTML's word count is more than 15% off the text's: 18 of 952 books, mostly ones whose text is in images.
+- **Every part opens with where you are:** book and part, chapter and section, printed pages (or % through when the edition has none), minutes, and a progress bar.
 - **Python functions, standard library only**, tested with `unittest` like the rest of the repo.
 
 ## How it works
@@ -14,12 +16,12 @@
 |---|---|
 | The dialog posts `{email, book, pace, tz}` | `site/home.js` → `api/subscribe.py` |
 | Confirmation email, transactional stream `outbound`. Unconfirmed sign-ups expire after 7 days | `drip/app.py` `subscribe` |
-| The link opens a page with a button, so mail scanners that follow links can't confirm. Part 1 goes out on the click | `api/confirm.py` |
+| The link opens a page that posts itself, so it's one click for the reader, but mail scanners that only follow links can't confirm. Without JavaScript the page shows a button. Part 1 goes out at once | `api/confirm.py` |
 | 06:00 UTC: each active reader who hasn't had a part today gets the next one, on stream `broadcast-1` | `api/cron.py`, `vercel.json` |
-| "Send me the next part now", the same button pattern | `api/next.py` |
+| "Send me the next part now", the same pattern | `api/next.py` |
 | Unsubscribe: Postmark's link (`{{{ pm:unsubscribe }}}`). When Postmark refuses a send (406), the subscription stops | `drip/app.py` `send_next` |
 
-The cutter (`drip/cut.py`) removes Gutenberg's header, footer, credits and illustration tags. Part 1 opens on chapter one when the title page, contents and preface before it are under 5% of the book (514 of 952 books). Longer openings are kept, because they're usually the author's own prologue, as in The Turn of the Screw. `KEEP_FRONT_MATTER` lists books whose short opening is worth reading too (Darwin's introduction, Gulliver's letters). The rest is cut at paragraph breaks into parts of 230 words × minutes, with a new part at a chapter heading once the current part is half full. Check a book with `python3 drip/cut.py public-domain/books/1342/pg1342.txt --pace 10`.
+The cutter (`drip/cut.py`) works on blocks with Gutenberg's header, footer, credits, contents and illustrations already removed. Part 1 opens on chapter one when the title page, contents and preface before it are under 5% of the book (514 of 952 books). Longer openings are kept, because they're usually the author's own prologue, as in The Turn of the Screw. `KEEP_FRONT_MATTER` lists books whose short opening is worth reading too (Darwin's introduction, Gulliver's letters). The rest is cut at paragraph breaks into parts of 230 words × minutes, with a new part at a chapter heading once the current part is half full. Check a book with `python3 drip/cut.py public-domain/books/1342/pg1342.txt --pace 10`.
 
 ## Setup (once)
 

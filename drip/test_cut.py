@@ -1,7 +1,8 @@
 """Offline tests for drip/cut.py. Run: python3 -m unittest discover -s drip"""
 import unittest
 
-from cut import clean, cut, metadata, paragraphs, part_heading, part_words, to_html, words
+from cut import clean, context, cut, cut_blocks, metadata, paragraphs, part_heading, part_words, to_html, to_text, words
+from gutenberg_html import blocks
 
 RAW = """﻿The Project Gutenberg eBook of Test Book\r
 \r
@@ -126,10 +127,69 @@ class FrontMatterTest(unittest.TestCase):
 
 class HtmlTest(unittest.TestCase):
     def test_escapes_and_italics(self):
-        out = to_html([("h", "CHAPTER I."), ("p", "Fish & _chips_ <now>"), ("verse", "one\ntwo")])
+        out = to_html(paragraphs("CHAPTER I.\n\nFish & _chips_ <now>\n\none\ntwo"))
         self.assertIn("<h2", out)
         self.assertIn("Fish &amp; <em>chips</em> &lt;now&gt;", out)
         self.assertIn("one<br>two", out)
+
+    def test_quotes_share_one_blockquote_and_pages_stay_hidden(self):
+        out = to_html([("p", "Thus write,"), ("quote", "red"), ("quote", "blue"), ("pg", "7"), ("p", "Done.")])
+        self.assertEqual(out.count("<blockquote"), 1)
+        self.assertNotIn("7", out)
+        self.assertEqual(to_text([("quote", "a &amp; b"), ("pg", "7")]), "    a & b")
+
+
+class PlainQuotesTest(unittest.TestCase):
+    def test_indented_lines_are_quotes(self):
+        text = "\n\n".join([prose(30), "  red, white, and blue", prose(30), prose(30)])
+        self.assertEqual([k for k, _ in paragraphs(text)], ["p", "quote", "p", "p"])
+
+    def test_not_when_the_whole_book_is_indented(self):
+        text = "\n\n".join("  " + prose(30).replace("\n", "\n  ") for _ in range(4))
+        self.assertEqual({k for k, _ in paragraphs(text)}, {"p"})
+
+
+PAGE = """<html><head><style>p {}</style></head><body>
+<header id="pg-header"><h2>The Project Gutenberg eBook of Rules</h2><p>Licence.</p></header>
+<p class="toc"><a href="#ch1" class="pginternal">Chapter I</a></p>
+<table><tr><td>I.</td><td>Introductory</td><td>5</td></tr><tr><td>II.</td><td>Usage</td><td>7</td></tr></table>
+<h1>RULES</h1>
+<span class="pagenum"><a id="Page_7">{7}</a></span>
+<h2>II. ELEMENTARY RULES OF USAGE</h2>
+<h3><a id="Rule_2">2.</a> Use a comma.</h3>
+<p>Thus <i>write</i>,</p>
+<div class="example"><p>red, white, and blue</p><p>gold, silver, or copper</p></div>
+<div class="figcenter"><img src="x.jpg" alt=""><p class="caption">A picture</p></div>
+<p>This rule<span class="pagenum" title="8"></span> is easy.</p>
+<table><tr><td>Young, the task seemed easy.</td><td>Young, I thought the task easy.</td></tr></table>
+<div class="poem"><div class="stanza"><span class="i0">Line one,<br></span><span class="i0">line two.<br></span></div>
+<div class="stanza"><div class="verse">Line three.</div></div></div>
+<footer id="pg-footer"><p>More licence.</p></footer>
+</body></html>"""
+
+
+class GutenbergHtmlTest(unittest.TestCase):
+    def test_blocks(self):
+        self.assertEqual(blocks(PAGE), [
+            ("h1", "RULES"), ("pg", "7"), ("h2", "II. ELEMENTARY RULES OF USAGE"), ("h3", "2. Use a comma."),
+            ("p", "Thus <em>write</em>,"), ("quote", "red, white, and blue"), ("quote", "gold, silver, or copper"),
+            ("p", "This rule is easy."), ("pg", "8"), ("quote", "Young, the task seemed easy."),
+            ("quote", "Young, I thought the task easy."), ("verse", "Line one,\nline two."), ("verse", "Line three.")])
+
+
+class ContextTest(unittest.TestCase):
+    def test_trail_and_pages(self):
+        book = [("h1", "Rules"), ("pg", "1"), ("h2", "I. Intro"), ("p", prose(1200)), ("pg", "2"),
+                ("h2", "II. Usage"), ("h3", "1. Commas"), ("p", prose(1200)), ("pg", "3"), ("p", prose(1200))]
+        parts = cut_blocks(book, 5, skip_front=False)
+        self.assertEqual(len(parts), 3)
+        self.assertEqual(context(parts, 1, "Rules"), {"trail": ["I. Intro"], "pages": ("1", "2")})
+        self.assertEqual(context(parts, 2, "Rules"), {"trail": ["II. Usage", "1. Commas"], "pages": ("2", "3")})
+        self.assertEqual(context(parts, 3, "Rules"), {"trail": ["II. Usage", "1. Commas"], "pages": ("3", "3")})
+
+    def test_no_pages(self):
+        parts = cut(prose(100), 5)
+        self.assertIsNone(context(parts, 1)["pages"])
 
 
 if __name__ == "__main__":
