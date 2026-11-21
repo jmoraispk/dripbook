@@ -10,7 +10,8 @@ list or the downloads change:
   python3 scripts/build_library.py --force-covers   # redo every cover image
 
 Needs Pillow for the covers (`uv run --with pillow scripts/build_library.py`);
-without it the page falls back to printed cloth covers. Books flagged
+without it the page falls back to cloth covers drawn in CSS. Books with no
+scanned cover get a printed one from scripts/make_covers.py; run that first. Books flagged
 check_translator are left out until their translation is checked.
 """
 import argparse
@@ -79,12 +80,12 @@ LISTS = [
 # The home page, top to bottom. ("top", genre, n) is a ranked list; ("genre", name)
 # and ("list", name) are plain rows; "week" and "long" come from word counts.
 LAYOUT = [
-    ("top", None, 10), ("week",), ("top", "Mystery & crime", 5), ("genre", "Romance"),
-    ("genre", "Sci-fi & fantasy"), ("top", "Philosophy", 5), ("list", "Banned books"),
-    ("genre", "Horror & ghost stories"), ("genre", "Adventure"), ("top", "Self-improvement", 5),
-    ("list", "They became films"), ("genre", "Myths & legends"), ("top", "History", 5),
-    ("list", "By Nobel Prize winners"), ("genre", "Funny books"), ("top", "Science & technology", 5),
-    ("genre", "Poetry"), ("genre", "Plays"), ("genre", "Children's classics"), ("top", "Business & money", 5),
+    ("top", None, 10), ("week",), ("top", "Mystery & crime", 10), ("genre", "Romance"),
+    ("genre", "Sci-fi & fantasy"), ("top", "Philosophy", 10), ("list", "Banned books"),
+    ("genre", "Horror & ghost stories"), ("genre", "Adventure"), ("top", "Self-improvement", 10),
+    ("list", "They became films"), ("genre", "Myths & legends"), ("top", "History", 10),
+    ("list", "By Nobel Prize winners"), ("genre", "Funny books"), ("top", "Science & technology", 10),
+    ("genre", "Poetry"), ("genre", "Plays"), ("genre", "Children's classics"), ("top", "Business & money", 10),
     ("genre", "Biography & memoir"), ("list", "Bestsellers of 1895 to 1923"), ("long",),
 ]
 
@@ -165,8 +166,8 @@ def save_cover(book_id, force):
         return False
     with zipfile.ZipFile(zpath) as zf:
         # A scanned or volunteer-made cover ('images/cover.jpg', 'img-cover.jpg'). The plain covers
-        # Gutenberg generates for books without one ('{id}-cover.png') are skipped: the page's
-        # cloth covers look better.
+        # Gutenberg generates for books without one ('{id}-cover.png') are skipped:
+        # scripts/make_covers.py prints a better one.
         names = sorted((n for n in zf.namelist()
                         if re.search(r"cover[^/]*\.(jpe?g|png)$", n.rsplit("/", 1)[-1], re.I)
                         and not re.match(rf"{book_id}-cover\.png$", n)), key=len)

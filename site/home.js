@@ -174,8 +174,9 @@
     head.appendChild(el('h1', null, name));
     head.appendChild(el('p', null, plural(ids.length, 'book')));
     view.appendChild(head);
-    view.appendChild(row('Top 5 in ' + name, ids.slice(0, 5), { ranked: true, eager: true }));
-    grid('Every book in ' + name, ids.slice(5));
+    var top = ids.slice(0, 10);
+    view.appendChild(row('Top ' + top.length + ' in ' + name, top, { ranked: true, eager: true }));
+    if (ids.length > top.length) grid('More in ' + name, ids.slice(top.length));
   }
 
   function showSearch(q) {
