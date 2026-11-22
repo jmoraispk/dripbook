@@ -30,7 +30,7 @@
   var IA_SEARCH = 'https://archive.org/advancedsearch.php';
   // HathiTrust: our copy of its public-domain list, as files on R2 read a slice at a time (scripts/hathi_search.py).
   // Empty shows HathiTrust as coming soon. On this machine, the files the sources tool serves.
-  var HATHI_R2 = '';
+  var HATHI_R2 = 'https://assets.dripbook.ai/hathi/';
   var HATHI = /^(localhost|127\.|10\.|192\.168\.)/.test(location.hostname)
     ? location.protocol + '//' + location.hostname + ':8765/hathi-search/' : HATHI_R2 || null;
   var far = {};              // a query's scan searches: {ia, hathi}, each 'searching', 'error', 'off' or a list
