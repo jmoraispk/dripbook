@@ -69,7 +69,8 @@ def get(url, params=None, timeout=60, raw=False):
 # --- Search ---------------------------------------------------------------------------------
 def search_ia(q, rows=30):
     """Old English texts on the Internet Archive that it marks as out of copyright, or that predate 1931."""
-    words = " ".join(f'"{w}"' for w in re.findall(r"[\w'-]+", q)[:8])
+    # every word in the title or the author, not anywhere in the description
+    words = " AND ".join(f'(title:"{w}" OR creator:"{w}")' for w in re.findall(r"[\w'-]+", q)[:8])
     query = (f"({words}) AND mediatype:texts AND (language:eng OR language:English) "
              f"AND (possible-copyright-status:NOT_IN_COPYRIGHT OR date:[1500-01-01 TO 1930-12-31])")
     data = get(IA_SEARCH, {"q": query, "fl[]": ["identifier", "title", "creator", "date", "downloads",
