@@ -1,4 +1,5 @@
-// Dripbook home page: rows of covers, genres, search and the book window. Data: library.json (scripts/build_library.py).
+// Dripbook home page: rows of covers, genres, search and the book window. Data: library.json (scripts/build_library.py)
+// and, once someone searches, catalog.json: the other Gutenberg books, which readers can request (scripts/build_catalog.py).
 (function () {
   'use strict';
 
@@ -18,7 +19,10 @@
   ];
 
   var lib = null;            // library.json
-  var current = null;        // the book in the dialog
+  var cat = null;            // catalog.json, loaded on the first search: {total, books: [[id, title, author, subtitle]]}
+  var catLoad = null;
+  var SHOWN = 40;            // catalog matches listed at once
+  var current = null;        // the book in the dialog: a library id, or a catalog entry when it's a request
   var pace = 10;
   var view = $('#view');
   var dialog = $('#book-dialog');
@@ -52,8 +56,8 @@
     }
     return box;
   }
-  function cloth(id) {
-    var b = lib.books[id];
+  function cloth(id, b) {
+    b = b || lib.books[id];
     var c = el('div', { class: 'cloth', style: '--c:' + COVER_COLORS[id % COVER_COLORS.length] });
     c.appendChild(el('b', null, b.title));
     c.appendChild(el('i', null, b.author));
@@ -186,17 +190,78 @@
       var b = lib.books[id], hay = b.hay || (b.hay = fold(b.title + ' ' + b.author));
       return words.every(function (w) { return hay.indexOf(w) >= 0; });
     });
+    var more = cat ? findInCatalog(words) : [];
     view.textContent = '';
     var head = el('div', { class: 'view-head' });
     head.appendChild(el('h1', null, 'Results for “' + q.trim() + '”'));
-    head.appendChild(el('p', null, plural(ids.length, 'book')));
+    var counts = [plural(ids.length, 'book') + ' to start now'];
+    if (more.length) counts.push(more.length.toLocaleString('en') + ' to request');
+    head.appendChild(el('p', null, counts.join(', ')));
     view.appendChild(head);
-    if (!ids.length) {
-      view.appendChild(el('p', { class: 'empty' },
-        'No book or author matches “' + q.trim() + '”. Try a last name, like Austen or Tolstoy, or pick a genre above.'));
-      return;
+    if (ids.length) grid('Matching books', ids);
+    if (more.length) requestList(more);
+    if (!cat) {
+      view.appendChild(el('p', { class: 'empty', id: 'cat-wait' }, 'Looking through the rest of Project Gutenberg…'));
+      loadCatalog().then(function () { if (search.value.trim() === q) showSearch(q); }, function () {
+        var w = $('#cat-wait');
+        if (w) w.textContent = 'The rest of Project Gutenberg didn’t load. Search again to retry.';
+      });
+    } else if (!ids.length && !more.length) {
+      var p = el('p', { class: 'empty' },
+        'No book or author matches “' + q.trim() + '”, here or on Project Gutenberg. Try a last name, like Austen or Tolstoy. If it’s an old book we should find, ');
+      p.appendChild(el('a', { href: 'how.html#request' }, 'ask for it'));
+      p.appendChild(document.createTextNode('.'));
+      view.appendChild(p);
     }
-    grid('Matching books', ids);
+  }
+
+  // --- The rest of Gutenberg: listed, and requested rather than started -------------------
+  function loadCatalog() {
+    if (!catLoad) {
+      catLoad = fetch('catalog.json').then(function (r) {
+        if (!r.ok) throw new Error(r.status);
+        return r.json();
+      }).then(function (data) {
+        cat = { total: data.total, books: data.books, byId: {} };
+        data.books.forEach(function (b) {
+          cat.byId[b[0]] = b;
+          b.push(fold(b[1] + ' ' + b[3]), fold(b[2]));   // [4] title words, [5] author
+        });
+      });
+      catLoad.catch(function () { catLoad = null; });
+    }
+    return catLoad;
+  }
+  function findInCatalog(words) {
+    var inTitle = [], other = [];
+    cat.books.forEach(function (b) {
+      var hay = b[4] + ' ' + b[5];
+      if (!words.every(function (w) { return hay.indexOf(w) >= 0; })) return;
+      (words.every(function (w) { return b[4].indexOf(w) >= 0; }) ? inTitle : other).push(b);
+    });
+    return inTitle.concat(other);
+  }
+  function requestList(books) {
+    var sec = el('section', { class: 'asks' });
+    sec.appendChild(el('h2', null, 'More on Project Gutenberg'));
+    sec.appendChild(el('p', null, 'We haven’t made these into drips yet. Request one and we’ll email you when it’s ready.'));
+    var list = el('ul', { 'aria-label': 'Books to request' });
+    books.slice(0, SHOWN).forEach(function (b) {
+      var li = el('li');
+      var btn = el('button', { type: 'button', 'data-ask': b[0] });
+      var t = el('span', { class: 'ask-title' }, b[1]);
+      btn.appendChild(t);
+      btn.appendChild(el('span', { class: 'ask-by' }, b[2]));
+      btn.appendChild(el('span', { class: 'ask-go', 'aria-hidden': 'true' }, 'Request'));
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+    sec.appendChild(list);
+    if (books.length > SHOWN) {
+      sec.appendChild(el('p', { class: 'ask-more' },
+        (books.length - SHOWN).toLocaleString('en') + ' more. Add a word or the author’s name to narrow it down.'));
+    }
+    view.appendChild(sec);
   }
 
   function grid(label, ids) {
@@ -212,6 +277,12 @@
       if (!view.querySelector('.row, .grid')) showHome();
       var id = h.slice(5);
       if (lib.books[id]) openBook(id);
+      return;
+    }
+    if (h.indexOf('request/') === 0) {
+      var gid = h.slice(8);
+      if (!view.querySelector('.row, .grid, .asks')) showHome();
+      loadCatalog().then(function () { if (cat.byId[gid]) openRequest(cat.byId[gid]); });
       return;
     }
     if (dialog.open) dialog.close();
@@ -232,6 +303,7 @@
   function openBook(id) {
     var b = lib.books[id];
     current = id;
+    $('#dlg-start').textContent = 'Start reading';
     var a = art(id, true);
     a.id = 'dlg-art';
     $('#dlg-art').replaceWith(a);
@@ -261,6 +333,26 @@
     if (!dialog.open) dialog.showModal();
     dialog.scrollTop = 0;
   }
+  // A Gutenberg book we haven't made a drip of: same window, with an email and a request.
+  function openRequest(b) {
+    current = { id: b[0], title: b[1], author: b[2] };
+    var a = el('div', { class: 'art', id: 'dlg-art' });
+    a.appendChild(cloth(b[0], { title: b[1], author: b[2] }));
+    $('#dlg-art').replaceWith(a);
+    $('#dlg-title').textContent = b[1];
+    $('#dlg-by').textContent = b[2];
+    $('#dlg-tags').textContent = '';
+    $('#dlg-blurb').textContent = (b[3] ? b[3].replace(/^./, function (c) { return c.toUpperCase(); }) + '. ' : '') +
+      'We haven’t made this one into a drip yet. Request it and we’ll email you when it’s ready to start.';
+    $('#dlg-blurb').hidden = false;
+    $('#dlg-plan').hidden = true;
+    $('#dlg-start').textContent = 'Request book';
+    $('#alike').textContent = '';
+    note('');
+    if (!dialog.open) dialog.showModal();
+    dialog.scrollTop = 0;
+  }
+
   function renderDays() {
     var b = lib.books[current], m = mornings(b, pace);
     if (!m) return;
@@ -281,12 +373,13 @@
   }
 
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[data-id], [data-genre], [data-close], [data-pace], [data-home]');
+    var t = e.target.closest('[data-id], [data-ask], [data-genre], [data-close], [data-pace], [data-home]');
     if (!t) return;
     if (t.matches('[data-pace]')) { pace = +t.dataset.pace; renderDays(); return; }
     if (t.matches('[data-close]')) { dialog.close(); return; }
     if (t.matches('[data-home]')) { e.preventDefault(); search.value = ''; go(''); return; }
     if (t.matches('[data-id]')) { go('#book/' + t.dataset.id); return; }
+    if (t.matches('[data-ask]')) { go('#request/' + t.dataset.ask); return; }
     if (t.matches('[data-genre]')) {
       search.value = '';
       if (dialog.open) dialog.close();
@@ -296,11 +389,11 @@
 
   dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
   dialog.addEventListener('close', function () {
-    if (location.hash.indexOf('#book/') === 0) history.replaceState(null, '', location.pathname + (lastView || ''));
+    if (/^#(book|request)\//.test(location.hash)) history.replaceState(null, '', location.pathname + (lastView || ''));
   });
   var lastView = '';
   window.addEventListener('hashchange', function () {
-    if (location.hash.indexOf('#book/') !== 0) lastView = location.hash;
+    if (!/^#(book|request)\//.test(location.hash)) lastView = location.hash;
     route();
   });
 
@@ -315,13 +408,15 @@
   }
   $('#join').addEventListener('submit', function (e) {
     e.preventDefault();
-    var btn = $('#dlg-start'), book = current;
+    var btn = $('#dlg-start'), book = current, email = $('#email').value;
+    var ask = typeof book === 'object';
     btn.disabled = true;
     note('Sending…');
-    fetch('/api/subscribe', {
+    fetch(ask ? '/api/request' : '/api/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: $('#email').value, book: book, pace: pace, tz: timeZone() })
+      body: JSON.stringify(ask ? { email: email, title: book.title, author: book.author, gutenberg: book.id }
+                               : { email: email, book: book, pace: pace, tz: timeZone() })
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
         if (current !== book) return;
@@ -356,7 +451,7 @@
     lib = data;
     search.placeholder = 'Search ' + lib.total.toLocaleString('en') + ' books and authors';
     buildChips();
-    if (location.hash.indexOf('#book/') !== 0) lastView = location.hash;
+    if (!/^#(book|request)\//.test(location.hash)) lastView = location.hash;
     route();
   }).catch(function () {
     view.innerHTML = '<p class="empty">The library didn’t load. Refresh the page to try again.</p>';

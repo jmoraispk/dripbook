@@ -274,6 +274,16 @@ class RequestTest(unittest.TestCase):
             with self.assertRaises(Problem):
                 d.request_book(title, "", email)
 
+    def test_a_gutenberg_book_from_search_keeps_its_number(self):
+        d, _, _ = make()
+        out = d.request_book("The Philosophy of the Beautiful", "William Knight", "a@b.co", gutenberg="12345")
+        self.assertIn("when The Philosophy of the Beautiful is ready", out["message"])
+        d.request_book("Emma", "", "a@b.co")
+        self.assertEqual([r.get("gutenberg") for r in self.saved(d)], [12345, None])
+        for bad in ("12a", "-1", "12345678"):
+            with self.assertRaises(Problem):
+                d.request_book("Dune", "", "a@b.co", gutenberg=bad)
+
     def test_stops_taking_requests_when_full(self):
         d, _, _ = make()
         d.request_book("Dune", "", "a@b.co")

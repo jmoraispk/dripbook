@@ -324,9 +324,13 @@ class Drip:
         return sub, self.send_next(sub)
 
     # Book requests
-    def request_book(self, title, author, email, mine=False, sender=""):
-        """Save a request for a book we don't have yet. Every request is kept, in order."""
+    def request_book(self, title, author, email, mine=False, sender="", gutenberg=None):
+        """Save a request for a book we don't have yet. Every request is kept, in order.
+        gutenberg is the book's Gutenberg number when it was picked from search (site/catalog.json)."""
         title, author = " ".join(str(title or "").split()), " ".join(str(author or "").split())
+        gutenberg = str(gutenberg or "").strip()
+        if gutenberg and (not gutenberg.isdigit() or len(gutenberg) > 7):
+            raise Problem(400, "We don't know that book. Search for it again.")
         email = str(email or "").strip().lower()
         if not title:
             raise Problem(400, "Tell us the book's title.")
@@ -336,15 +340,19 @@ class Drip:
             raise Problem(400, "That email address doesn't look right.")
         if mine:
             reply = {"status": "saved", "message": f"Thanks. We'll write to {email} to set up {title} with you."}
+        elif gutenberg:
+            reply = {"status": "saved", "message": f"Requested. We'll email {email} when {title} is ready to start."}
         else:
             reply = {"status": "saved", "message": f"Thanks. We'll ask for {title} and email {email} when it's here."}
-        same = hashlib.sha256(json.dumps([sender, title, author, email, bool(mine)]).encode()).hexdigest()[:32]
+        same = hashlib.sha256(json.dumps([sender, title, author, email, bool(mine), gutenberg]).encode()).hexdigest()[:32]
         if not self.redis("SET", f"request-seen:{same}", "1", "EX", REPEAT_SECONDS, "NX"):
             return reply   # the same request again, moments later
         if int(self.redis("LLEN", REQUESTS) or 0) >= MAX_REQUESTS:
             raise Problem(503, "We can't take requests right now. Try again tomorrow.")
-        self.redis("RPUSH", REQUESTS, json.dumps({
-            "title": title, "author": author, "email": email, "mine": bool(mine), "at": int(self.clock())}))
+        entry = {"title": title, "author": author, "email": email, "mine": bool(mine), "at": int(self.clock())}
+        if gutenberg:
+            entry["gutenberg"] = int(gutenberg)
+        self.redis("RPUSH", REQUESTS, json.dumps(entry))
         return reply
 
     # A reader's own PDF

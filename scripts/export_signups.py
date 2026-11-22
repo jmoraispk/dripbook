@@ -24,7 +24,7 @@ from app import OLD_REQUESTS, REQUESTS, Redis, load_library  # noqa: E402
 
 # book is a library id, or own:… for a reader's own PDF.
 SUB_FIELDS = ["email", "book", "title", "status", "pace", "sent", "tz", "created", "confirmed", "last_day"]
-REQUEST_FIELDS = ["at", "title", "author", "email", "mine"]
+REQUEST_FIELDS = ["at", "title", "author", "email", "mine", "gutenberg_id"]   # gutenberg_id: picked from search
 
 
 def load_env(path):
@@ -66,7 +66,7 @@ def requests(redis):
     rows += [json.loads(v) for v in (redis("HGETALL", OLD_REQUESTS) or [])[1::2]]   # from before 22 Nov 2026
     rows.sort(key=lambda r: r.get("at", 0))
     return [{**{k: r.get(k, "") for k in REQUEST_FIELDS}, "at": when(r.get("at")),
-             "mine": "yes" if r.get("mine") else ""} for r in rows]
+             "mine": "yes" if r.get("mine") else "", "gutenberg_id": r.get("gutenberg", "")} for r in rows]
 
 
 def write(path, fields, rows):

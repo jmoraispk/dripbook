@@ -104,7 +104,8 @@ def request_book(req):
         return 200, JSON, json.dumps({"status": "saved", "message": "Thanks."})
     mine = str(data.get("mine", "")).lower() in ("1", "true", "on", "yes")
     sender = req.headers.get("x-forwarded-for", "").split(",")[0].strip()
-    out = drip(mail=False).request_book(data.get("title"), data.get("author"), data.get("email"), mine, sender)
+    out = drip(mail=False).request_book(data.get("title"), data.get("author"), data.get("email"), mine, sender,
+                                            data.get("gutenberg"))
     return 200, JSON, json.dumps(out)
 
 
