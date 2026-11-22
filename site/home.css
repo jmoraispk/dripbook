@@ -39,6 +39,7 @@ p{margin:0}
 .bar-in{display:flex;align-items:center;gap:clamp(12px,3vw,32px);padding:12px var(--gutter)}
 .brand{display:flex;align-items:center;gap:9px;font:600 1.3rem/1 var(--serif);text-decoration:none;flex:none}
 .brand svg path{stroke:var(--text)}
+.brand span{position:relative;top:-.22em} /* Literata sits low in its line: share the tagline's baseline */
 .tag{color:var(--muted);font-size:.9375rem;white-space:nowrap}
 .search{margin-left:auto;position:relative;flex:0 1 340px;min-width:0}
 .search svg{position:absolute;left:14px;top:50%;translate:0 -50%;width:17px;height:17px;stroke:var(--muted);fill:none;stroke-width:2}
