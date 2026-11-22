@@ -24,6 +24,8 @@ email, then a part every morning. Only addresses in ALLOWED_EMAILS can sign up u
 Standard library only.
 """
 import argparse
+import array
+import bisect
 import csv
 import datetime
 import gzip
@@ -32,6 +34,7 @@ import io
 import json
 import re
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -88,22 +91,57 @@ def search_ia(q, rows=30):
     return out
 
 
+HATHI = {}                 # the index in memory, loaded on the first search (load_hathi)
+HATHI_LOCK = threading.Lock()
+
+
+def load_hathi():
+    """Our HathiTrust index, held in memory: the file's lines, and a lowercase 'title author' line per
+    book to search, with where each starts. About 400 MB; a search then takes well under a second."""
+    with HATHI_LOCK:
+        if not HATHI and HATHI_INDEX.exists():
+            with gzip.open(HATHI_INDEX, "rb") as f:
+                raw = f.read()
+            lines = raw.split(b"\n")[1:]
+            col = {name: i for i, name in enumerate(HATHI_FIELDS)}
+            hays, starts, pos = [], array.array("q"), 0
+            for line in lines:
+                cells = line.split(b"\t")
+                hay = (cells[col["title"]] + b" " + cells[col["author"]]).lower() if len(cells) == len(HATHI_FIELDS) else b""
+                starts.append(pos)
+                pos += len(hay) + 1
+                hays.append(hay)
+            HATHI.update(lines=lines, hay=b"\n".join(hays), starts=starts)
+    return HATHI or None
+
+
 def search_hathi(q, limit=30):
-    """Our copy of HathiTrust's public-domain English books (see hathi_index)."""
-    if not HATHI_INDEX.exists():
+    """Our copy of HathiTrust's public-domain English books (see hathi_index): every word in the
+    title or author. Looks up the longest word, then checks the rest on that book's line."""
+    index = load_hathi()
+    if index is None:
         return None
-    words = [w.lower() for w in re.findall(r"[\w'-]+", q)]
-    out = []
-    with gzip.open(HATHI_INDEX, "rt", encoding="utf-8") as f:
-        for row in csv.DictReader(f, delimiter="\t"):
-            hay = f"{row['title']} {row['author']}".lower()
-            if all(w in hay for w in words):
-                out.append({"source": "hathi", "id": "ht:" + row["htid"], "title": row["title"],
-                            "author": row["author"], "year": row["year"],
-                            "rights": "Public domain everywhere" if row["rights"] == "pd" else "Public domain in the US",
-                            "url": f"https://catalog.hathitrust.org/Record/{row['bib']}"})
-                if len(out) >= limit:
-                    break
+    words = sorted({w.lower().encode() for w in re.findall(r"[\w'-]+", q)}, key=len, reverse=True)
+    if not words:
+        return []
+    hay, starts, out, seen, pos = index["hay"], index["starts"], [], set(), 0
+    while len(out) < limit:
+        pos = hay.find(words[0], pos)
+        if pos < 0:
+            break
+        n = bisect.bisect_right(starts, pos) - 1
+        pos = starts[n + 1] if n + 1 < len(starts) else len(hay)
+        if n in seen:
+            continue
+        seen.add(n)
+        end = starts[n + 1] - 1 if n + 1 < len(starts) else len(hay)
+        if all(w in hay[starts[n]:end] for w in words[1:]):
+            row = next(csv.reader([index["lines"][n].decode("utf-8")], delimiter="\t"))
+            row = dict(zip(HATHI_FIELDS, row))
+            out.append({"source": "hathi", "id": "hathi:" + row["htid"], "title": row["title"],
+                        "author": row["author"], "year": row["year"],
+                        "rights": "Public domain everywhere" if row["rights"] == "pd" else "Public domain in the US",
+                        "url": f"https://catalog.hathitrust.org/Record/{row['bib']}"})
     return out
 
 
@@ -421,7 +459,7 @@ def as_lessons(parts):
 
 def open_book(source_id, pace=10):
     """Everything the search page shows for one book, with its parts."""
-    if source_id.startswith("ht:"):
+    if source_id.startswith("hathi:"):
         raise ValueError("Open the Internet Archive copy: HathiTrust doesn't let scripts read its pages.")
     identifier = source_id.removeprefix("ia:")
     info, xml = fetch_ia(identifier)
@@ -466,9 +504,11 @@ def start_drip(book, email, site=SITE):
 class Handler(BaseHTTPRequestHandler):
     books = {}
 
-    def send(self, status, body, kind="application/json"):
+    def send(self, status, body, kind="application/json", anyone=False):
         data = body if isinstance(body, bytes) else json.dumps(body).encode()
         self.send_response(status)
+        if anyone:   # read-only search, for the website's search box (site/home.js)
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -484,6 +524,8 @@ class Handler(BaseHTTPRequestHandler):
                 hathi = search_hathi(q.get("q", ""))
                 return self.send(200, {"ia": search_ia(q.get("q", "")), "hathi": hathi,
                                        "hathi_ready": hathi is not None})
+            if url.path == "/hathi":
+                return self.send(200, {"hathi": search_hathi(q.get("q", ""))}, anyone=True)
             if url.path == "/twin":
                 return self.send(200, {"twin": ia_twin(q.get("title", ""), q.get("author", ""))})
             if url.path == "/open":
@@ -524,6 +566,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.cmd == "serve":
         print(f"Search page: http://{args.host}:{args.port}  (Ctrl-C to stop)")
+        threading.Thread(target=load_hathi, daemon=True).start()
         ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
     elif args.cmd == "search":
         q = " ".join(args.words)

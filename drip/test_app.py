@@ -284,6 +284,16 @@ class RequestTest(unittest.TestCase):
             with self.assertRaises(Problem):
                 d.request_book("Dune", "", "a@b.co", gutenberg=bad)
 
+    def test_a_scan_from_search_keeps_its_id(self):
+        d, _, _ = make()
+        out = d.request_book("Miss Marjoribanks", "Margaret Oliphant", "a@b.co", source="ia:missmarjoribanks00olip")
+        self.assertIn("when Miss Marjoribanks is ready", out["message"])
+        d.request_book("Persuasion", "", "a@b.co", source="hathi:uc1.$b123456")
+        self.assertEqual([r.get("source") for r in self.saved(d)], ["ia:missmarjoribanks00olip", "hathi:uc1.$b123456"])
+        for bad in ("gutenberg:12", "ia:", "ia:a b", "ia:<x>", "ia:" + "x" * 121):
+            with self.assertRaises(Problem):
+                d.request_book("Dune", "", "a@b.co", source=bad)
+
     def test_stops_taking_requests_when_full(self):
         d, _, _ = make()
         d.request_book("Dune", "", "a@b.co")

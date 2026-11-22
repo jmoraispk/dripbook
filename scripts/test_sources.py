@@ -1,6 +1,7 @@
 """Offline tests for sources.py's scan cleanup: python3 -m unittest discover -s scripts -p 'test_sources.py'"""
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "drip"))
@@ -63,6 +64,23 @@ class Blocks(unittest.TestCase):
     def test_lessons_use_the_editor_kinds(self):
         self.assertEqual(sources.as_lessons([[("h", "One"), ("p", "x"), ("pg", "3"), ("h3", "y")]]),
                          [[["h2", "One"], ["p", "x"], ["pg", "3"], ["h3", "y"]]])
+
+
+class Hathi(unittest.TestCase):
+    def test_every_word_in_the_title_or_author(self):
+        import gzip, tempfile
+        rows = [sources.HATHI_FIELDS,
+                ["uc1.a", "pd", "1", "", "Dracula / by Bram Stoker.", "London", "1897", "Stoker, Bram, 1847-1912."],
+                ["uc1.b", "pdus", "2", "", "The jewel of seven stars", "London", "1903", "Stoker, Bram, 1847-1912."],
+                ["uc1.c", "pd", "3", "", "Dracula's guest", "London", "1914", "Stoker, Bram"]]
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "hathi.tsv.gz"
+            with gzip.open(path, "wt", encoding="utf-8") as f:
+                f.write("\n".join("\t".join(r) for r in rows) + "\n")
+            with unittest.mock.patch.object(sources, "HATHI_INDEX", path), unittest.mock.patch.dict(sources.HATHI, clear=True):
+                self.assertEqual([r["id"] for r in sources.search_hathi("stoker dracula")], ["hathi:uc1.a", "hathi:uc1.c"])
+                self.assertEqual([r["rights"] for r in sources.search_hathi("jewel")], ["Public domain in the US"])
+                self.assertEqual(sources.search_hathi("london"), [], "the publisher isn't searched")
 
 
 if __name__ == "__main__":

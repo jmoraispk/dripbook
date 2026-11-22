@@ -54,6 +54,7 @@ PENDING_SECONDS = 7 * 24 * 3600
 RESEND_SECONDS = 60
 MIN_WORDS = 500          # below this the "book" is a stub (music, scans), not a drip
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+SCAN_ID = re.compile(r"^(ia|hathi):[A-Za-z0-9._$:/+-]{1,120}$")   # a scanned book picked from search
 TIME_ZONE = re.compile(r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$")   # an IANA name like Europe/Lisbon
 # Book requests: a Redis list with one entry per request. Only an identical request from the
 # same address within 10 minutes (a double click) is dropped.
@@ -324,12 +325,16 @@ class Drip:
         return sub, self.send_next(sub)
 
     # Book requests
-    def request_book(self, title, author, email, mine=False, sender="", gutenberg=None):
+    def request_book(self, title, author, email, mine=False, sender="", gutenberg=None, source=None):
         """Save a request for a book we don't have yet. Every request is kept, in order.
-        gutenberg is the book's Gutenberg number when it was picked from search (site/catalog.json)."""
+        gutenberg is the book's Gutenberg number when it was picked from search (site/catalog.json);
+        source names a scan picked from search: 'ia:<Internet Archive identifier>' or 'hathi:<HathiTrust id>'."""
         title, author = " ".join(str(title or "").split()), " ".join(str(author or "").split())
         gutenberg = str(gutenberg or "").strip()
         if gutenberg and (not gutenberg.isdigit() or len(gutenberg) > 7):
+            raise Problem(400, "We don't know that book. Search for it again.")
+        source = str(source or "").strip()
+        if source and not SCAN_ID.match(source):
             raise Problem(400, "We don't know that book. Search for it again.")
         email = str(email or "").strip().lower()
         if not title:
@@ -340,11 +345,11 @@ class Drip:
             raise Problem(400, "That email address doesn't look right.")
         if mine:
             reply = {"status": "saved", "message": f"Thanks. We'll write to {email} to set up {title} with you."}
-        elif gutenberg:
+        elif gutenberg or source:
             reply = {"status": "saved", "message": f"Requested. We'll email {email} when {title} is ready to start."}
         else:
             reply = {"status": "saved", "message": f"Thanks. We'll ask for {title} and email {email} when it's here."}
-        same = hashlib.sha256(json.dumps([sender, title, author, email, bool(mine), gutenberg]).encode()).hexdigest()[:32]
+        same = hashlib.sha256(json.dumps([sender, title, author, email, bool(mine), gutenberg, source]).encode()).hexdigest()[:32]
         if not self.redis("SET", f"request-seen:{same}", "1", "EX", REPEAT_SECONDS, "NX"):
             return reply   # the same request again, moments later
         if int(self.redis("LLEN", REQUESTS) or 0) >= MAX_REQUESTS:
@@ -352,6 +357,8 @@ class Drip:
         entry = {"title": title, "author": author, "email": email, "mine": bool(mine), "at": int(self.clock())}
         if gutenberg:
             entry["gutenberg"] = int(gutenberg)
+        if source:
+            entry["source"] = source
         self.redis("RPUSH", REQUESTS, json.dumps(entry))
         return reply
 

@@ -23,12 +23,19 @@ button{padding:9px 16px;border-radius:999px;border:0;background:var(--drop);colo
 button.quiet{background:none;color:var(--text);box-shadow:inset 0 0 0 1.5px var(--rule);font-weight:600}
 button:disabled{opacity:.55;cursor:wait}
 :focus-visible{outline:3px solid var(--drop);outline-offset:2px}
-main{display:grid;grid-template-columns:minmax(300px,420px) 1fr;min-height:calc(100vh - 130px)}
-@media (max-width:860px){main{grid-template-columns:1fr}}
-#results{border-right:1px solid var(--rule);padding:8px 0;overflow:auto;max-height:calc(100vh - 130px)}
-#results h2{margin:14px 20px 6px;font:600 .95rem/1.3 var(--sans);color:var(--muted)}
-#results ul{list-style:none;margin:0;padding:0}
-#results li{padding:10px 20px;border-bottom:1px solid var(--rule)}
+main{display:grid;grid-template-columns:1fr;min-height:calc(100vh - 130px)}
+main.reading{grid-template-columns:minmax(300px,440px) 1fr}
+@media (max-width:860px){main.reading{grid-template-columns:1fr}}
+#results{padding:8px 0;overflow:auto;max-height:calc(100vh - 130px)}
+main.reading #results{border-right:1px solid var(--rule)}
+#results details{border-bottom:1px solid var(--rule)}
+#results summary{cursor:pointer;padding:14px 20px 10px;font:600 1rem/1.3 var(--sans);list-style-position:inside}
+#results summary .m{font-weight:400;margin-left:6px}
+#results ul{list-style:none;margin:0;padding:0 0 8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
+main.reading #results ul{grid-template-columns:1fr}
+#results li{padding:10px 20px;border-top:1px solid var(--rule)}
+.dups{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:.9rem;white-space:nowrap}
+.dups input{accent-color:var(--drop);width:16px;height:16px}
 #results li.on{background:var(--panel)}
 .t{font:500 1rem/1.3 var(--serif)}
 .m{color:var(--muted);font-size:.85rem}
@@ -37,6 +44,8 @@ main{display:grid;grid-template-columns:minmax(300px,420px) 1fr;min-height:calc(
 .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.75rem;box-shadow:inset 0 0 0 1px var(--rule)}
 .tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}.tag.bad{color:var(--bad)}
 #book{padding:20px 28px 60px;overflow:auto;max-height:calc(100vh - 130px)}
+main:not(.reading) #book{display:none}
+.close{float:right}
 #book .empty{color:var(--muted);max-width:60ch}
 .facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:14px 0;font-size:.92rem}
 .facts dt{color:var(--muted)}.facts dd{margin:0}
@@ -59,11 +68,12 @@ a{color:var(--drop)}
   <form class="find" id="find">
     <input type="search" id="q" placeholder="Title or author, e.g. philosophy of the beautiful knight" autocomplete="off" required>
     <button type="submit">Search</button>
+    <label class="dups"><input type="checkbox" id="dups" checked> Filter duplicates</label>
   </form>
 </header>
-<main>
+<main id="main">
   <section id="results" aria-label="Results"><p class="m" style="padding:0 20px">Results from both libraries show here.</p></section>
-  <section id="book" aria-live="polite"><p class="empty">Open a book to see its text cut into morning parts.</p></section>
+  <section id="book" aria-live="polite"></section>
 </main>
 <script>
 (function () {
@@ -76,28 +86,60 @@ a{color:var(--drop)}
     return n;
   }
   function json(r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); }
-  var book = null, pace = 10;
+  var book = null, pace = 10, found = null, shut = {};
+
+  function fold(s) { return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+  // Same title (its first four words, before any subtitle) and same first author's surname (site/home.js: sameBook).
+  function dupKey(r) {
+    var t = fold(r.title).split(/\s*[:;\/(\[]|,\s+(?:being|or|with|containing|by|from|and other)\b/)[0];
+    t = t.replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(function (w) { return w && !/^(the|a|an)$/.test(w); });
+    var a = fold(r.author).split(';')[0].replace(/\([^)]*\)/g, ' ').replace(/\d.*$/, '');
+    var names = (a.indexOf(',') >= 0 ? a.split(',')[0] : a).match(/[a-z]+/g) || [''];
+    return t.slice(0, 4).join(' ') + '|' + names[names.length - 1];
+  }
+  // Keeps the most downloaded copy of each.
+  function dedupe(rows) {
+    var best = {}, order = [];
+    rows.forEach(function (r) {
+      var k = dupKey(r);
+      if (!(k in best)) { best[k] = r; order.push(k); }
+      else if ((r.downloads || 0) > (best[k].downloads || 0)) best[k] = r;
+    });
+    return order.map(function (k) { return best[k]; });
+  }
 
   $('#find').addEventListener('submit', function (e) {
     e.preventDefault();
     var q = $('#q').value.trim(), box = $('#results');
-    box.innerHTML = '<p class="m" style="padding:0 20px">Searching… (HathiTrust takes a few seconds)</p>';
-    fetch('/search?q=' + encodeURIComponent(q)).then(json).then(function (d) {
-      box.textContent = '';
-      list('Internet Archive · ' + d.ia.length, d.ia, true);
-      if (!d.hathi_ready) box.appendChild(el('p', { class: 'm', style: 'padding:0 20px' },
-        'HathiTrust: run `python3 scripts/sources.py hathi-index` once to search it.'));
-      else list('HathiTrust · ' + d.hathi.length, d.hathi, false);
-    }).catch(function (err) { box.innerHTML = ''; box.appendChild(el('p', { class: 'm', style: 'padding:0 20px' }, 'Search failed: ' + err.message)); });
+    box.innerHTML = '<p class="m" style="padding:0 20px">Searching…</p>';
+    fetch('/search?q=' + encodeURIComponent(q)).then(json).then(function (d) { found = d; render(); })
+      .catch(function (err) { box.innerHTML = ''; box.appendChild(el('p', { class: 'm', style: 'padding:0 20px' }, 'Search failed: ' + err.message)); });
   });
+  $('#dups').addEventListener('change', function () { if (found) render(); });
+
+  function render() {
+    var box = $('#results'), d = found;
+    box.textContent = '';
+    list('ia', 'Internet Archive', d.ia, true);
+    if (!d.hathi_ready) box.appendChild(el('p', { class: 'm', style: 'padding:0 20px' },
+      'HathiTrust: run `python3 scripts/sources.py hathi-index` once to search it.'));
+    else list('hathi', 'HathiTrust', d.hathi, false);
+  }
 
   function rightsTag(r) {
     var cls = /everywhere/.test(r) ? 'ok' : 'warn';
     return el('span', { class: 'tag ' + cls }, r);
   }
-  function list(title, rows, readable) {
+  function list(key, title, all, readable) {
     var box = $('#results');
-    box.appendChild(el('h2', null, title));
+    var rows = $('#dups').checked ? dedupe(all) : all;
+    var group = el('details');
+    group.open = !shut[key];
+    group.addEventListener('toggle', function () { shut[key] = !group.open; });
+    var sum = el('summary', null, title);
+    sum.appendChild(el('span', { class: 'm' }, rows.length + (rows.length < all.length ? ' (' + (all.length - rows.length) + ' duplicates hidden)' : '')));
+    group.appendChild(sum);
+    box.appendChild(group);
     var ul = el('ul');
     rows.forEach(function (r) {
       var li = el('li');
@@ -126,20 +168,31 @@ a{color:var(--drop)}
       ul.appendChild(li);
     });
     if (!rows.length) ul.appendChild(el('li', { class: 'm' }, 'Nothing found.'));
-    box.appendChild(ul);
+    group.appendChild(ul);
   }
-  function mark(li) { Array.prototype.forEach.call(document.querySelectorAll('#results li.on'), function (x) { x.classList.remove('on'); }); li.classList.add('on'); }
+  function mark(li) { Array.prototype.forEach.call(document.querySelectorAll('#results li.on'), function (x) { x.classList.remove('on'); }); if (li) li.classList.add('on'); }
 
+  function closeBook() { $('#main').classList.remove('reading'); $('#book').textContent = ''; mark(null); }
   function openBook(id) {
     var pane = $('#book');
+    $('#main').classList.add('reading');
     pane.innerHTML = '<p class="empty">Reading the scan and cutting it into parts… (first time: downloading its OCR text)</p>';
     fetch('/open?id=' + encodeURIComponent(id) + '&pace=' + pace).then(json).then(function (b) { book = b; show(1); })
-      .catch(function (err) { pane.innerHTML = ''; pane.appendChild(el('p', { class: 'empty' }, 'Couldn’t open it: ' + err.message)); });
+      .catch(function (err) {
+        pane.innerHTML = '';
+        var close = el('button', { type: 'button', class: 'quiet close' }, 'Close');
+        close.onclick = closeBook;
+        pane.appendChild(close);
+        pane.appendChild(el('p', { class: 'empty' }, 'Couldn’t open it: ' + err.message));
+      });
   }
 
   function show(n) {
     var b = book, pane = $('#book');
     pane.textContent = '';
+    var close = el('button', { type: 'button', class: 'quiet close' }, 'Close');
+    close.onclick = closeBook;
+    pane.appendChild(close);
     pane.appendChild(el('h2', { style: 'font:600 1.5rem/1.2 Georgia,serif;margin:0' }, b.title));
     var dl = el('dl', { class: 'facts' });
     function fact(k, v) { dl.appendChild(el('dt', null, k)); var dd = el('dd'); if (typeof v === 'string') dd.textContent = v; else dd.appendChild(v); dl.appendChild(dd); }
