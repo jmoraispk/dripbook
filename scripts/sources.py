@@ -52,6 +52,7 @@ IA_META = "https://archive.org/metadata/{id}"
 IA_FILE = "https://archive.org/download/{id}/{name}"
 HATHI_LIST = "https://www.hathitrust.org/files/hathifiles/hathi_file_list.json"
 HATHI_INDEX = ROOT / "public-domain" / "cache" / "hathi_pd.tsv.gz"
+HATHI_SEARCH = ROOT / "public-domain" / "cache" / "hathi-search"   # hathi_search.py build
 HATHI_FIELDS = ["htid", "rights", "bib", "oclc", "title", "imprint", "year", "author"]
 WIKIDATA = "https://www.wikidata.org/w/api.php"
 SITE = "https://dripbook.ai"
@@ -507,7 +508,7 @@ class Handler(BaseHTTPRequestHandler):
     def send(self, status, body, kind="application/json", anyone=False):
         data = body if isinstance(body, bytes) else json.dumps(body).encode()
         self.send_response(status)
-        if anyone:   # read-only search, for the website's search box (site/home.js)
+        if anyone:   # read-only files, for the website's search box (site/home.js)
             self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(data)))
@@ -524,8 +525,8 @@ class Handler(BaseHTTPRequestHandler):
                 hathi = search_hathi(q.get("q", ""))
                 return self.send(200, {"ia": search_ia(q.get("q", "")), "hathi": hathi,
                                        "hathi_ready": hathi is not None})
-            if url.path == "/hathi":
-                return self.send(200, {"hathi": search_hathi(q.get("q", ""))}, anyone=True)
+            if url.path.startswith("/hathi-search/"):
+                return self.send_slice(url.path.removeprefix("/hathi-search/"))
             if url.path == "/twin":
                 return self.send(200, {"twin": ia_twin(q.get("title", ""), q.get("author", ""))})
             if url.path == "/open":
@@ -535,6 +536,33 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, {"error": "Not found"})
         except (OSError, ValueError, KeyError, ET.ParseError) as e:
             return self.send(502, {"error": str(e) or type(e).__name__})
+
+    def send_slice(self, name):
+        """The HathiTrust search files (hathi_search.py build), by byte range like R2, for the site's search box."""
+        path = (HATHI_SEARCH / name).resolve()
+        if not path.is_relative_to(HATHI_SEARCH.resolve()) or not path.is_file():
+            return self.send(404, {"error": "Not found"}, anyone=True)
+        size = path.stat().st_size
+        m = re.fullmatch(r"bytes=(\d+)-(\d*)", self.headers.get("Range", ""))
+        if not m:
+            return self.send(200, path.read_bytes(), "application/json" if name.endswith(".json") else "text/plain", anyone=True)
+        a, b = int(m[1]), min(int(m[2] or size - 1), size - 1)
+        with open(path, "rb") as f:
+            f.seek(a)
+            data = f.read(max(0, b - a + 1))
+        self.send_response(206)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Range", f"bytes {a}-{b}/{size}")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Range")
+        self.send_header("Access-Control-Allow-Methods", "GET")
+        self.end_headers()
 
     def do_POST(self):
         if urllib.parse.urlsplit(self.path).path != "/start":

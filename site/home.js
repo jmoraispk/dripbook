@@ -28,8 +28,11 @@
   // Scanned books. The Internet Archive answers the browser directly. HathiTrust's list is searched by
   // scripts/sources.py, which runs only on our own machine for now, so the live site leaves it out.
   var IA_SEARCH = 'https://archive.org/advancedsearch.php';
+  // HathiTrust: our copy of its public-domain list, as files on R2 read a slice at a time (scripts/hathi_search.py).
+  // Empty shows HathiTrust as coming soon. On this machine, the files the sources tool serves.
+  var HATHI_R2 = '';
   var HATHI = /^(localhost|127\.|10\.|192\.168\.)/.test(location.hostname)
-    ? location.protocol + '//' + location.hostname + ':8765/hathi' : null;
+    ? location.protocol + '//' + location.hostname + ':8765/hathi-search/' : HATHI_R2 || null;
   var far = {};              // a query's scan searches: {ia, hathi}, each 'searching', 'error', 'off' or a list
   var farTimer = null, farNext = '';
   var scans = [];            // the scans listed on screen, for their Request buttons
@@ -292,13 +295,7 @@
     function again() { if (search.value.trim().toLowerCase() === key) showSearch(search.value); }
     again();
     searchArchive(q).then(function (rows) { f.ia = rows; }, function () { f.ia = 'error'; }).then(again);
-    if (HATHI) {
-      fetchJson(HATHI + '?q=' + encodeURIComponent(q)).then(function (d) {
-        f.hathi = (d.hathi || []).map(function (r) {
-          return { source: r.id, title: r.title, author: r.author, year: r.year, url: r.url, from: 'HathiTrust' };
-        });
-      }, function () { f.hathi = 'error'; }).then(again);
-    }
+    if (HATHI) searchHathi(q).then(function (rows) { f.hathi = rows; }, function () { f.hathi = 'error'; }).then(again);
   }
   function fetchJson(url) {
     var stop = new AbortController(), t = setTimeout(function () { stop.abort(); }, 20000);
@@ -326,6 +323,72 @@
                  downloads: x.downloads || 0, url: 'https://archive.org/details/' + x.identifier, from: 'the Internet Archive' };
       });
     });
+  }
+  // Every word but the small ones in the title or author, shortest titles first. Four rounds of requests:
+  // top.json (once), each word's dictionary block, each word's books, then those books' lines.
+  var hathiTop = null, HATHI_SKIP = /^(a|an|and|the|of|in|on|by|to|for|with|or|at|from|as|is)$/;
+  function hathiWords(s) {
+    var seen = {};
+    return (s.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '').match(/[\p{L}\p{N}]+/gu) || [])
+      .filter(function (w) { return !seen[w] && (seen[w] = 1); });
+  }
+  function hathiSlice(v, file, at, len) {
+    var stop = new AbortController(), t = setTimeout(function () { stop.abort(); }, 20000);
+    // no-store: the browser would otherwise queue requests for parts of the same file one behind another
+    return fetch(HATHI + v + '/' + file, { cache: 'no-store', signal: stop.signal,
+                                           headers: { Range: 'bytes=' + at + '-' + (at + len - 1) } })
+      .then(function (r) {
+        if (r.status !== 206) { stop.abort(); throw new Error('No byte ranges: ' + r.status); }  // never the whole file
+        return r.arrayBuffer();
+      }).then(function (b) { clearTimeout(t); return new Uint8Array(b); },
+              function (e) { clearTimeout(t); throw e; });
+  }
+  function searchHathi(q) {
+    var all = hathiWords(q), ws = all.filter(function (w) { return !HATHI_SKIP.test(w); });
+    if (!ws.length) ws = all;
+    if (!ws.length) return Promise.resolve([]);
+    var text = new TextDecoder();
+    if (!hathiTop) hathiTop = fetchJson(HATHI + 'top.json').catch(function (e) { hathiTop = null; throw e; });
+    return hathiTop.then(function (top) {
+      return Promise.all(ws.map(function (w) {
+        var lo = 0, hi = top.words.length - 1;          // the last block starting at or before the word
+        while (lo < hi) { var m = (lo + hi + 1) >> 1; if (top.words[m] <= w) lo = m; else hi = m - 1; }
+        if (top.words[lo] > w) return null;
+        return hathiSlice(top.v, 'dict.txt', top.at[lo], top.len[lo]).then(function (b) {
+          var line = text.decode(b).split('\n').filter(function (l) { return l.split('\t')[0] === w; })[0];
+          return line ? line.split('\t').map(Number) : null;      // [, books, offset, size]
+        });
+      })).then(function (found) {
+        if (found.some(function (x) { return !x; })) return [];
+        return Promise.all(found.map(function (x) {
+          return hathiSlice(top.v, 'postings', x[2], x[3]).then(hathiIds);
+        })).then(function (lists) {
+          var ids = lists.sort(function (a, b) { return a.length - b.length; }).reduce(hathiBoth).slice(0, 30);
+          return Promise.all(ids.map(function (at) {
+            return hathiSlice(top.v, 'rows.txt', at, 1500).then(function (b) {
+              var x = text.decode(b).split('\n')[0].split('\t');   // htid, bib, year, pd, title, author
+              return { source: 'hathi:' + x[0], title: x[4], author: x[5], year: x[2],
+                       url: 'https://catalog.hathitrust.org/Record/' + x[1], from: 'HathiTrust' };
+            });
+          }));
+        });
+      });
+    });
+  }
+  function hathiIds(b) {             // varint gaps -> sorted ids
+    var ids = [], n = 0, d = 0, shift = 0;
+    for (var i = 0; i < b.length; i++) {
+      d += (b[i] & 127) * Math.pow(2, shift);
+      if (b[i] & 128) shift += 7; else { n += d; ids.push(n); d = 0; shift = 0; }
+    }
+    return ids;
+  }
+  function hathiBoth(a, b) {         // ids in both sorted lists
+    var out = [], i = 0, j = 0;
+    while (i < a.length && j < b.length) {
+      if (a[i] < b[j]) i++; else if (a[i] > b[j]) j++; else { out.push(a[i]); i++; j++; }
+    }
+    return out;
   }
   // A query's scans, with copies of the same book and books we already list taken out.
   function scanRows(f, ids, more) {
