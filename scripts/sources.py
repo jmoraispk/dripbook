@@ -513,6 +513,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("serve")
     s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to reach it from another machine")
     q = sub.add_parser("search")
     q.add_argument("words", nargs="+")
     p = sub.add_parser("preview")
@@ -522,8 +523,8 @@ def main(argv=None):
     sub.add_parser("hathi-index")
     args = ap.parse_args(argv)
     if args.cmd == "serve":
-        print(f"Search page: http://localhost:{args.port}  (Ctrl-C to stop)")
-        ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
+        print(f"Search page: http://{args.host}:{args.port}  (Ctrl-C to stop)")
+        ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
     elif args.cmd == "search":
         q = " ".join(args.words)
         for r in search_ia(q, rows=10) + (search_hathi(q, 10) or []):
