@@ -33,6 +33,7 @@
   var HATHI_R2 = 'https://assets.dripbook.ai/hathi/';
   var HATHI = /^(localhost|127\.|10\.|192\.168\.)/.test(location.hostname)
     ? location.protocol + '//' + location.hostname + ':8765/hathi-search/' : HATHI_R2 || null;
+  var entered = '';          // the query the reader pressed Enter on: search the scans without waiting
   var far = {};              // a query's scan searches: {ia, hathi}, each 'searching', 'error', 'off' or a list
   var farTimer = null, farNext = '';
   var scans = [];            // the scans listed on screen, for their Request buttons
@@ -205,11 +206,12 @@
       return words.every(function (w) { return hay.indexOf(w) >= 0; });
     });
     var more = cat ? findInCatalog(words) : [];
-    // Nothing here or on Gutenberg: look through the scans as soon as the reader stops typing.
+    // Nothing here or on Gutenberg: look through the scans once the reader stops typing, or at once after Enter.
     if (cat && !ids.length && !more.length && !far[key] && farNext !== key) {
       clearTimeout(farTimer);
       farNext = key;
-      farTimer = setTimeout(function () { farNext = ''; if (search.value.trim().toLowerCase() === key) searchFar(q); }, 450);
+      farTimer = setTimeout(function () { farNext = ''; if (search.value.trim().toLowerCase() === key) searchFar(q); },
+                            entered === key ? 0 : 450);
     }
     var f = far[key] || (farNext === key ? { ia: 'searching', hathi: HATHI ? 'searching' : 'off' } : null);
     var found = scanRows(f, ids, more);
@@ -343,13 +345,17 @@
       }).then(function (b) { clearTimeout(t); return new Uint8Array(b); },
               function (e) { clearTimeout(t); throw e; });
   }
+  function hathiIndex() {
+    if (!hathiTop) hathiTop = fetchJson(HATHI + 'top.json');
+    hathiTop.catch(function () { hathiTop = null; });
+    return hathiTop;
+  }
   function searchHathi(q) {
     var all = hathiWords(q), ws = all.filter(function (w) { return !HATHI_SKIP.test(w); });
     if (!ws.length) ws = all;
     if (!ws.length) return Promise.resolve([]);
     var text = new TextDecoder();
-    if (!hathiTop) hathiTop = fetchJson(HATHI + 'top.json').catch(function (e) { hathiTop = null; throw e; });
-    return hathiTop.then(function (top) {
+    return hathiIndex().then(function (top) {
       return Promise.all(ws.map(function (w) {
         var lo = 0, hi = top.words.length - 1;          // the last block starting at or before the word
         while (lo < hi) { var m = (lo + hi + 1) >> 1; if (top.words[m] <= w) lo = m; else hi = m - 1; }
@@ -694,7 +700,22 @@
       else if (!q) showHome();
     }, 120);
   });
-  $('#search-form').addEventListener('submit', function (e) { e.preventDefault(); search.blur(); });
+  $('#search-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    search.blur();
+    var q = search.value.trim();
+    if (q.length < 2) return;
+    clearTimeout(timer);
+    entered = q.toLowerCase();
+    if (farNext === entered) { clearTimeout(farTimer); farNext = ''; }   // already waiting: don't
+    if (location.hash) history.replaceState(null, '', location.pathname);
+    showSearch(q);
+  });
+  // Someone who clicks into the box is about to search: fetch the lists it needs now.
+  search.addEventListener('focus', function () {
+    loadCatalog().catch(function () {});
+    if (HATHI) hathiIndex().catch(function () {});
+  }, { once: true });
   document.addEventListener('keydown', function (e) {
     if (e.key === '/' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName) && !dialog.open) {
       e.preventDefault(); search.focus();
