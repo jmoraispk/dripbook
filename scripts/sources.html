@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dripbook sources</title>
+<style>
+:root{
+  --bg:#0C1222;--panel:#141C31;--panel-2:#1D2742;--text:#ECEFF5;--muted:#9AA4BA;--rule:#27314D;
+  --drop:#F2B230;--on-drop:#15203B;--ok:#8FD19E;--warn:#FFC36B;--bad:#FF9A8F;
+  --serif:Georgia,'Times New Roman',serif;--sans:system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 var(--sans)}
+header{padding:20px 24px 14px;border-bottom:1px solid var(--rule)}
+h1{margin:0 0 4px;font:600 1.3rem/1.2 var(--serif)}
+header p{margin:0;color:var(--muted);max-width:80ch}
+form.find{display:flex;gap:8px;margin-top:14px;max-width:720px}
+input,select,button{font:inherit;color:inherit}
+select{padding:9px 12px;border-radius:999px;border:1px solid var(--rule);background:var(--panel)}
+input[type=search],input[type=email]{flex:1;min-width:0;padding:10px 14px;border-radius:999px;border:1px solid var(--rule);background:var(--panel)}
+button{padding:9px 16px;border-radius:999px;border:0;background:var(--drop);color:var(--on-drop);font-weight:700;cursor:pointer}
+button.quiet{background:none;color:var(--text);box-shadow:inset 0 0 0 1.5px var(--rule);font-weight:600}
+button:disabled{opacity:.55;cursor:wait}
+:focus-visible{outline:3px solid var(--drop);outline-offset:2px}
+main{display:grid;grid-template-columns:minmax(300px,420px) 1fr;min-height:calc(100vh - 130px)}
+@media (max-width:860px){main{grid-template-columns:1fr}}
+#results{border-right:1px solid var(--rule);padding:8px 0;overflow:auto;max-height:calc(100vh - 130px)}
+#results h2{margin:14px 20px 6px;font:600 .95rem/1.3 var(--sans);color:var(--muted)}
+#results ul{list-style:none;margin:0;padding:0}
+#results li{padding:10px 20px;border-bottom:1px solid var(--rule)}
+#results li.on{background:var(--panel)}
+.t{font:500 1rem/1.3 var(--serif)}
+.m{color:var(--muted);font-size:.85rem}
+.acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+.acts button{padding:5px 12px;font-size:.82rem}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.75rem;box-shadow:inset 0 0 0 1px var(--rule)}
+.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}.tag.bad{color:var(--bad)}
+#book{padding:20px 28px 60px;overflow:auto;max-height:calc(100vh - 130px)}
+#book .empty{color:var(--muted);max-width:60ch}
+.facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:14px 0;font-size:.92rem}
+.facts dt{color:var(--muted)}.facts dd{margin:0}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0}
+.parts{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 18px}
+.parts button{padding:4px 10px;font-size:.8rem;background:var(--panel-2);color:var(--text);font-weight:500}
+.parts button[aria-pressed=true]{background:var(--drop);color:var(--on-drop)}
+article{background:#FBF8F1;color:#222;border-radius:10px;padding:28px clamp(18px,4vw,48px);max-width:680px;font:18px/1.6 var(--serif)}
+article p{margin:0 0 1em}
+article h2,article h3,article h1,article h4{font-family:var(--serif);color:#111;line-height:1.3}
+article .note,article [data-kind=note]{font-size:15px;color:#555}
+.msg{min-height:1.4em;font-size:.9rem}.msg.ok{color:var(--ok)}.msg.err{color:var(--bad)}
+a{color:var(--drop)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Dripbook sources</h1>
+  <p>Search the Internet Archive and HathiTrust for public-domain books, see how a scan reads after cleanup, and start a drip of it. Local tool: nothing here is on the website.</p>
+  <form class="find" id="find">
+    <input type="search" id="q" placeholder="Title or author, e.g. philosophy of the beautiful knight" autocomplete="off" required>
+    <button type="submit">Search</button>
+  </form>
+</header>
+<main>
+  <section id="results" aria-label="Results"><p class="m" style="padding:0 20px">Results from both libraries show here.</p></section>
+  <section id="book" aria-live="polite"><p class="empty">Open a book to see its text cut into morning parts.</p></section>
+</main>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  function el(tag, attrs, text) {
+    var n = document.createElement(tag);
+    for (var k in attrs || {}) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function json(r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); }
+  var book = null, pace = 10;
+
+  $('#find').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var q = $('#q').value.trim(), box = $('#results');
+    box.innerHTML = '<p class="m" style="padding:0 20px">Searching… (HathiTrust takes a few seconds)</p>';
+    fetch('/search?q=' + encodeURIComponent(q)).then(json).then(function (d) {
+      box.textContent = '';
+      list('Internet Archive · ' + d.ia.length, d.ia, true);
+      if (!d.hathi_ready) box.appendChild(el('p', { class: 'm', style: 'padding:0 20px' },
+        'HathiTrust: run `python3 scripts/sources.py hathi-index` once to search it.'));
+      else list('HathiTrust · ' + d.hathi.length, d.hathi, false);
+    }).catch(function (err) { box.innerHTML = ''; box.appendChild(el('p', { class: 'm', style: 'padding:0 20px' }, 'Search failed: ' + err.message)); });
+  });
+
+  function rightsTag(r) {
+    var cls = /everywhere/.test(r) ? 'ok' : 'warn';
+    return el('span', { class: 'tag ' + cls }, r);
+  }
+  function list(title, rows, readable) {
+    var box = $('#results');
+    box.appendChild(el('h2', null, title));
+    var ul = el('ul');
+    rows.forEach(function (r) {
+      var li = el('li');
+      li.appendChild(el('div', { class: 't' }, r.title));
+      li.appendChild(el('div', { class: 'm' }, [r.author, r.year, r.downloads ? r.downloads.toLocaleString('en') + ' downloads' : ''].filter(Boolean).join(' · ')));
+      var acts = el('div', { class: 'acts' });
+      acts.appendChild(rightsTag(r.rights));
+      if (readable) {
+        var open = el('button', { type: 'button' }, 'Open');
+        open.onclick = function () { mark(li); openBook(r.id); };
+        acts.appendChild(open);
+      } else {
+        var twin = el('button', { type: 'button' }, 'Find a readable copy');
+        twin.onclick = function () {
+          mark(li); twin.disabled = true; twin.textContent = 'Looking on the Archive…';
+          fetch('/twin?title=' + encodeURIComponent(r.title) + '&author=' + encodeURIComponent(r.author)).then(json).then(function (d) {
+            if (d.twin) { twin.textContent = 'Open the Archive copy'; twin.disabled = false; twin.onclick = function () { openBook(d.twin.id); }; openBook(d.twin.id); }
+            else { twin.textContent = 'No copy on the Archive'; }
+          }).catch(function () { twin.textContent = 'Lookup failed'; twin.disabled = false; });
+        };
+        acts.appendChild(twin);
+      }
+      var a = el('a', { href: r.url, target: '_blank', rel: 'noopener', class: 'm' }, 'source');
+      acts.appendChild(a);
+      li.appendChild(acts);
+      ul.appendChild(li);
+    });
+    if (!rows.length) ul.appendChild(el('li', { class: 'm' }, 'Nothing found.'));
+    box.appendChild(ul);
+  }
+  function mark(li) { Array.prototype.forEach.call(document.querySelectorAll('#results li.on'), function (x) { x.classList.remove('on'); }); li.classList.add('on'); }
+
+  function openBook(id) {
+    var pane = $('#book');
+    pane.innerHTML = '<p class="empty">Reading the scan and cutting it into parts… (first time: downloading its OCR text)</p>';
+    fetch('/open?id=' + encodeURIComponent(id) + '&pace=' + pace).then(json).then(function (b) { book = b; show(1); })
+      .catch(function (err) { pane.innerHTML = ''; pane.appendChild(el('p', { class: 'empty' }, 'Couldn’t open it: ' + err.message)); });
+  }
+
+  function show(n) {
+    var b = book, pane = $('#book');
+    pane.textContent = '';
+    pane.appendChild(el('h2', { style: 'font:600 1.5rem/1.2 Georgia,serif;margin:0' }, b.title));
+    var dl = el('dl', { class: 'facts' });
+    function fact(k, v) { dl.appendChild(el('dt', null, k)); var dd = el('dd'); if (typeof v === 'string') dd.textContent = v; else dd.appendChild(v); dl.appendChild(dd); }
+    fact('Author', (b.author || 'unknown') + (b.year ? ' · ' + b.year : ''));
+    fact('Length', b.words.toLocaleString('en') + ' words · ' + b.n_parts + ' parts at ' + b.pace + ' min a day');
+    fact('US', b.rights_us);
+    var eu = el('span', { class: 'tag ' + (b.eu_ok ? 'ok' : 'warn') },
+      b.died ? 'Author died ' + b.died + (b.eu_ok ? ': public domain in the EU' : ': check before sending in the EU (cutoff ' + b.eu_cutoff + ')')
+             : 'Death year not found: check the author');
+    fact('EU', eu);
+    var links = el('span');
+    links.appendChild(el('a', { href: b.url, target: '_blank', rel: 'noopener' }, 'Archive page'));
+    if (b.pdf) { links.appendChild(document.createTextNode(' · ')); links.appendChild(el('a', { href: b.pdf, target: '_blank', rel: 'noopener' }, 'PDF (for the editor, with pictures)')); }
+    fact('Links', links);
+    pane.appendChild(dl);
+
+    var bar = el('div', { class: 'bar' });
+    var sel = el('select', { 'aria-label': 'Minutes a day' });
+    [5, 10, 20].forEach(function (m) { var o = el('option', { value: m }, m + ' min a day'); if (m === b.pace) o.selected = true; sel.appendChild(o); });
+    sel.onchange = function () { pace = +sel.value; openBook(b.id); };
+    bar.appendChild(sel);
+    var form = el('form', { style: 'display:flex;gap:8px;flex:1;min-width:280px' });
+    var email = el('input', { type: 'email', placeholder: 'Email for the drip (must be on ALLOWED_EMAILS)', required: '' });
+    var go = el('button', { type: 'submit' }, 'Start drip');
+    form.appendChild(email); form.appendChild(go);
+    bar.appendChild(form);
+    pane.appendChild(bar);
+    var msg = el('p', { class: 'msg', role: 'status' });
+    pane.appendChild(msg);
+    form.onsubmit = function (e) {
+      e.preventDefault(); go.disabled = true; msg.className = 'msg'; msg.textContent = 'Sending to dripbook.ai…';
+      fetch('/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.id, pace: b.pace, email: email.value }) })
+        .then(json).then(function (d) { msg.className = 'msg ok'; msg.textContent = d.message || 'Sent. Check your inbox.'; })
+        .catch(function (err) { msg.className = 'msg err'; msg.textContent = err.message; })
+        .then(function () { go.disabled = false; });
+    };
+
+    var parts = el('div', { class: 'parts', role: 'group', 'aria-label': 'Parts' });
+    b.parts.forEach(function (p, i) {
+      var btn = el('button', { type: 'button', 'aria-pressed': String(i + 1 === n), title: (p.heading || '') + ' · ' + p.words + ' words' }, String(i + 1));
+      btn.onclick = function () { show(i + 1); };
+      parts.appendChild(btn);
+    });
+    pane.appendChild(parts);
+    var p = b.parts[n - 1];
+    pane.appendChild(el('p', { class: 'm' }, 'Part ' + n + ' of ' + b.n_parts + (p.heading ? ' · ' + p.heading : '') + ' · ' + p.words + ' words'));
+    var art = el('article');
+    art.innerHTML = p.html;   // made by drip/cut.py from escaped text
+    pane.appendChild(art);
+  }
+})();
+</script>
+</body>
+</html>

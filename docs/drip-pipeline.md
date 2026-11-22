@@ -47,6 +47,8 @@ curl -H "Authorization: Bearer $CRON_SECRET" https://dripbook.ai/api/cron
 
 `python3 scripts/export_signups.py` writes `exports/subscribers.csv` (every `sub:*` record: email, book, status, parts sent, dates) and `exports/requests.csv`, and prints the most-requested titles. It reads `KV_REST_API_URL` and `KV_REST_API_TOKEN` from the shell or from `.env.local` (`vercel env pull .env.local`). Both files are git-ignored. To browse instead, use the Data Browser for this database in the Upstash console.
 
+Books outside Gutenberg: `python3 scripts/sources.py serve` is a local search page (not on the site) over the Internet Archive and HathiTrust. It cleans an Archive scan's OCR text into parts and can start a drip of it through `/api/own`, like a reader's own PDF. See the script's docstring.
+
 Tests: `python3 -m unittest discover -s drip`
 
 ## Not done yet
