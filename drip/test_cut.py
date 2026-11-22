@@ -33,6 +33,7 @@ Gutenberg licence text that must go.\r
 def prose(n_words, word="word"):
     """One paragraph of n_words words, hard-wrapped like Gutenberg text."""
     ws = [word] * n_words
+    ws[-1] += "."
     return "\n".join(" ".join(ws[i:i + 12]) for i in range(0, n_words, 12))
 
 
@@ -89,6 +90,13 @@ class CutTest(unittest.TestCase):
         parts = cut(" ".join([sentence] * 300), 5)   # 6,000 words, no breaks
         self.assertGreater(len(parts), 3)
         self.assertEqual(sum(part_words(p) for p in parts), 6000)
+
+    def test_a_part_never_stops_before_the_quotation_that_ends_its_sentence(self):
+        lead = prose(1100).rstrip(".") + " and he wrote these lines upon the tomb,"
+        text = "\n\n".join([lead, "    Here lies one whose name was writ in water.", prose(1100)])
+        parts = cut(text, 5)                       # target 1,150 words
+        self.assertIn("writ in water", to_text(parts[0]))
+        self.assertTrue(to_text(parts[0]).rstrip().endswith("."))
 
     def test_deterministic(self):
         text = clean(RAW.format(body="\n\n".join([prose(200)] * 30)))

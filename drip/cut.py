@@ -12,7 +12,9 @@ unknown level), p, quote, verse, note, and pg (a printed page number, never show
 
 cut_blocks() skips short front matter (title page, contents, preface) so part 1 opens on chapter
 one, then splits the book into parts of about WORDS_PER_MINUTE x pace words, at paragraph breaks,
-starting a new part at a chapter heading when the current one is long enough.
+starting a new part at a chapter heading when the current one is long enough. A part ends only where
+a sentence does, so a paragraph that runs on into a quotation or a poem isn't left hanging; past
+LONGEST x the target it ends anyway (verse without stops, chess notation).
 Cutting is deterministic, so part n of a book at a pace is always the same text.
 """
 import argparse
@@ -105,6 +107,16 @@ def paragraphs(text):
     return out
 
 
+SENTENCE_END = re.compile(r"""[.!?…][\s"'”’)\]*_\d]*$""")
+LONGEST = 1.5
+
+
+def ends_sentence(part):
+    """Whether a part's last text ends a sentence (a part of only headings or pages counts)."""
+    last = next((t for k, t in reversed(part) if k not in ("pg", "img") and not is_heading(k)), None)
+    return last is None or bool(SENTENCE_END.search(plain(last).rstrip()))
+
+
 def split_long(block, size):
     """Split one huge paragraph at sentence ends into pieces of about size words."""
     kind, text = block
@@ -164,13 +176,13 @@ def cut_blocks(found, pace, skip_front=True):
     for b in blocks:
         w = words(b[1])
         new_chapter = is_heading(b[0]) and n >= 0.5 * target
-        too_long = n + w > 1.2 * target and n >= 0.6 * target
+        too_long = n + w > 1.2 * target and n >= 0.6 * target and (ends_sentence(cur) or n + w > LONGEST * target)
         if cur and (new_chapter or too_long):
             parts.append(cur)
             cur, n = [], 0
         cur.append(b)
         n += w
-        if n >= target and not is_heading(b[0]) and b[0] != "pg":
+        if n >= target and not is_heading(b[0]) and b[0] != "pg" and (ends_sentence(cur) or n >= LONGEST * target):
             parts.append(cur)
             cur, n = [], 0
     if cur:
