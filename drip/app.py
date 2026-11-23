@@ -4,8 +4,9 @@ State lives in Upstash Redis (REST API), email goes through Postmark:
   sub:{token}           JSON subscription: email, book, pace, tz, status, sent, last_day, base
   who:{email}:{book}    token of that reader's subscription to that book
   active                set of tokens that get a part every morning
-  blocks:{id}           a book as cut.py blocks (JSON, gzip, base64), read once from Gutenberg's mirror:
-                        the HTML edition, or the plain text when the HTML is missing or garbled
+  blocks:{v}:{id}       a book as cut.py blocks (JSON, gzip, base64), read from Gutenberg's mirror:
+                        the HTML edition, or the plain text when the HTML is missing or garbled.
+                        v is READER: raise it when reading changes, so books are read again. Kept 90 days
   own:{id}              a reader's own PDF as the parts they cut in the editor (JSON, gzip, base64);
                         own-books tracks when each expires (30 days after its drip ends)
   own-pics:{id}         that book's pictures: part number -> JSON list of files in Vercel Blob
@@ -52,6 +53,8 @@ POSTMARK_API = "https://api.postmarkapp.com/email"
 SENDER = "Dripbook <lessons@mail.dripbook.ai>"
 PENDING_SECONDS = 7 * 24 * 3600
 RESEND_SECONDS = 60
+READER = 2               # version of the cached blocks (see blocks:{v}:{id} above)
+BLOCKS_DAYS = 90
 MIN_WORDS = 500          # below this the "book" is a stub (music, scans), not a drip
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SCAN_ID = re.compile(r"^(ia|hathi):[A-Za-z0-9._$:/+-]{1,120}$")   # a scanned book picked from search
@@ -179,9 +182,10 @@ def read_book(text, page=None):
             rich = []
         n_plain = sum(cut.words(t) for _, t in plain)
         n_rich = sum(cut.words(t) for _, t in rich)
-        if n_plain and HTML_WORDS[0] <= n_rich / n_plain <= HTML_WORDS[1]:
-            return rich
-    return plain
+        # (a plain text that's only a cover pointing to the HTML, as for Haeckel's Evolution of Man)
+        if n_plain and HTML_WORDS[0] <= n_rich / n_plain <= HTML_WORDS[1] or n_plain < MIN_WORDS <= n_rich:
+            return cut.drop_editorial(rich)
+    return cut.drop_editorial(plain)
 
 
 def load_library():
@@ -241,7 +245,7 @@ class Drip:
             self._books[book_id] = book
             return book
         info = self.library[book_id]
-        raw = self.redis("GET", f"blocks:{book_id}")
+        raw = self.redis("GET", f"blocks:{READER}:{book_id}")
         if raw:
             blocks = [tuple(b) for b in unpack(raw)]
         else:
@@ -256,7 +260,7 @@ class Drip:
             blocks = read_book(text, page)
             if sum(cut.words(t) for _, t in blocks) < MIN_WORDS:
                 raise Problem(422, "This one isn't available as a drip. Try another book.")
-            self.redis("SET", f"blocks:{book_id}", pack(blocks))
+            self.redis("SET", f"blocks:{READER}:{book_id}", pack(blocks), "EX", BLOCKS_DAYS * 86400)
         book = {"title": info["title"], "author": info.get("author", ""), "blocks": blocks}
         self._books[book_id] = book
         return book

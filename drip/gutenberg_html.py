@@ -29,12 +29,17 @@ PAGE_CELL = re.compile(r"^[\divxlcIVXLC.,\s-]+$")
 SKIP_CLASS = re.compile(r"\b(pg-boilerplate|toc|contents|caption|figcenter|figleft|figright|fig|illustration|"
                         r"transnote|tnote|hidden|hide|index)\b", re.I)
 SKIP_ID = re.compile(r"^(pg-header|pg-footer|pg-machine-header|pg-start-separator|pg-end-separator)", re.I)
-PAGENUM = re.compile(r"\b(pagenum|pageno|page-num|pgnum)\b", re.I)
+PAGENUM = re.compile(r"\b(pagenum|pageno|page-num|pgnum|pb|xxpn)\b|tei-pb", re.I)
+# A span that only says "[pg 12]" or "[Page iv]" is a page number whatever its class.
+PAGE_MARK = re.compile(r"^\s*\[\s*(?:pg|page)\.?\s*([0-9]+|[ivxlcdm]+)\s*\]\s*$", re.I)
+# What a footnote marker says: [12], (3), *, †, a letter.
+FN_MARK = re.compile(r"^\s*[\[(]?\s*(\d{1,4}|[A-Za-z]|[*†‡§¶]{1,3})\s*[\])]?\s*$")
 QUOTE_CLASS = re.compile(r"\b(blockquote|blockquot|bq|quote|quotation|example|extract|letter|epigraph|citation|"
                          r"inscription|sign|telegram|notice)\b", re.I)
 VERSE_CLASS = re.compile(r"\b(poem|poetry|stanza|verse|song|lg)\b", re.I)
 STANZA_CLASS = re.compile(r"\b(stanza|lg)\b", re.I)
-NOTE_CLASS = re.compile(r"\b(footnotes?|endnotes?|fnote)\b", re.I)
+NOTE_CLASS = re.compile(r"\b(footnotes?|endnotes?|fnote|notes?|foot)\b", re.I)
+NOTE_TEXT = re.compile(r"^\s*(?:<[^>]+>\s*)*(?:Footnote|Note)\s+[\dA-Z]{1,4}\s*(?:</[^>]+>\s*)*:")   # "Footnote 1: W. R. Anson…"
 INLINE = {"i": "em", "em": "em", "cite": "em", "b": "strong", "strong": "strong", "sup": "sup", "sub": "sub"}
 PAGE_NUMBER = re.compile(r"([0-9]+|[ivxlcdm]+)\s*$", re.I)
 
@@ -60,10 +65,14 @@ class Reader(HTMLParser):
         self.page = None       # a pagenum element being read: [attrs, text]
         self.tables = []       # open tables: where their blocks start, rows, rows that look like contents
         self.row = None        # the table row being read: did it link inside the book, its last cell
+        self.ids = []          # ids and names seen since the last block: a note's, to match it to its marker
 
     # Context from the open elements
     def inside(self, flag):
         return any(flag in f for _, f in self.stack)
+
+    def inside_tag(self, name):
+        return any(tag == name for tag, _ in self.stack)
 
     def kind(self):
         for tag, flags in reversed(self.stack):
@@ -94,9 +103,15 @@ class Reader(HTMLParser):
         if not visible.strip():
             return
         if links and links >= 0.6 * len(visible) and len(visible.split()) < 40:
+            self.ids = []
             return  # a line of a contents list or index
         if kind.startswith("h") and len(visible.split()) > 40:
             kind = "p"  # an whole paragraph set in a heading tag
+        ids, self.ids = self.ids, []
+        if kind == "p" and NOTE_TEXT.match(text):
+            kind = "note"
+        if kind == "note" and ids:
+            text = "\x02" + " ".join(ids) + "\x02" + text
         self.out.append((kind, close_tags(text)))
 
     # Parser callbacks
@@ -121,6 +136,11 @@ class Reader(HTMLParser):
             self.stack.append((tag, {"page"}))
             return
         flags = set()
+        if not self.skip:
+            self.ids.extend(a[k] for k in ("id", "name") if a.get(k))
+        if tag in ("a", "span") and not self.skip:
+            # Read its text before deciding what it is: a page number, a footnote marker, or just text.
+            flags.add(("text", len(self.buf), a.get("href", "")[1:] if a.get("href", "").startswith("#") else ""))
         if self.skip or tag in SKIP_TAGS or SKIP_CLASS.search(cls) or SKIP_ID.match(ident) \
                 or "display:none" in a.get("style", "").replace(" ", ""):
             flags.add("skip")
@@ -176,6 +196,9 @@ class Reader(HTMLParser):
                 if "skip" in flags:
                     self.skip -= 1
                 continue
+            for flag in flags:
+                if isinstance(flag, tuple) and flag[1] <= len(self.buf):
+                    self.read_inline(t, flag[1], flag[2])
             if t in BLOCK:
                 if self.kind() == "verse" and "stanza" not in flags:
                     self.buf.append("\n")
@@ -192,6 +215,19 @@ class Reader(HTMLParser):
                         del self.out[table["start"]:]  # a table of contents: page numbers or links
             elif t in INLINE:
                 self.buf.append(f"</{INLINE[t]}>")
+
+    def read_inline(self, tag, start, target):
+        """A span or link just ended: a page number ('[pg 12]') leaves the text; a footnote marker
+        ('[12]') linking to a note marks this block as the one the note belongs after."""
+        said = re.sub(r"<[^>]+>", "", "".join(self.buf[start:]))
+        m = PAGE_MARK.match(html.unescape(said)) if not target else None
+        if m:
+            del self.buf[start:]
+            self.flush_page(m.group(1))
+        elif target and FN_MARK.match(html.unescape(said)) and self.kind() != "note":
+            if not re.search(r"[\[(]|<sup>", "".join(self.buf[start:])) and not self.inside_tag("sup"):
+                self.buf[start:] = ["<sup>", *self.buf[start:], "</sup>"]   # 'Text1 here' -> 'Text¹ here'
+            self.buf.append(f"\x01{target}\x01")
 
     def flush_with(self, tag, flags):
         # The block's kind comes from the element being closed, which is already off the stack.
@@ -237,14 +273,49 @@ def soften_drop_cap(text):
     return DROP_CAP.sub(lambda m: m.group(1) + m.group(2) + m.group(3).lower(), text)
 
 
+CITES = re.compile(r"\x01([^\x01]*)\x01")
+NOTE_IDS = re.compile(r"^\x02([^\x02]*)\x02")
+
+
+def notes_in_place(found):
+    """Each footnote moved to just after the paragraph whose marker links to it, so a reader gets the
+    note with the text, not at the end of the chapter days later. A note's later paragraphs follow it;
+    notes nothing links to stay where they are."""
+    owner, host = {}, {}
+    for i, (kind, text) in enumerate(found):
+        m = NOTE_IDS.match(text) if kind == "note" else None
+        for ident in (m.group(1).split() if m else []):
+            owner.setdefault(ident, i)
+    for i, (kind, text) in enumerate(found):
+        if kind != "note":
+            for target in CITES.findall(text):
+                j = owner.get(target)
+                if j is not None and j not in host:
+                    host[j] = i
+    for i, (kind, text) in enumerate(found):   # a note's second paragraph goes with its first
+        if kind == "note" and i not in host and not NOTE_IDS.match(text) and i - 1 in host and found[i - 1][0] == "note":
+            host[i] = host[i - 1]
+    after = {}
+    for j in sorted(host):
+        after.setdefault(host[j], []).append(j)
+    out = []
+    for i, block in enumerate(found):
+        if i in host:
+            continue
+        out.append(block)
+        out.extend(found[j] for j in after.get(i, []))
+    return [(k, NOTE_IDS.sub("", CITES.sub("", t))) for k, t in out]
+
+
 def blocks(source):
-    """The book's blocks, in order, with page numbers found mid-paragraph moved after it."""
+    """The book's blocks, in order, with page numbers found mid-paragraph moved after it and
+    footnotes after the paragraph that cites them."""
     reader = Reader()
     reader.feed(source)
     reader.close()
     reader.flush()
     out = []
-    for kind, text in reader.out:
+    for kind, text in notes_in_place(reader.out):
         if kind == "p":
             text = soften_drop_cap(text)
         if "\x00" in text:

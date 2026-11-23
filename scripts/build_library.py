@@ -35,6 +35,8 @@ PER_ROW = 18
 SMALL = {"a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "into", "nor", "of", "on", "or",
          "the", "to", "with"}
 # Shorter names readers know these books by.
+# Gutenberg entries with no text to send (a drip of them would be empty).
+NOT_DRIPS = {7923: "pictures and page images only", 42911: "a music score: MP3, MIDI and PDF files"}
 TITLES = {3300: "The Wealth of Nations", 205: "Walden", 43: "Dr. Jekyll and Mr. Hyde",
           1080: "A Modest Proposal", 2591: "Grimms' Fairy Tales"}
 
@@ -149,7 +151,16 @@ def word_count(book_id):
     start, end = text.find("*** START"), text.find("*** END")
     if start >= 0 and end > start:
         text = text[text.find("\n", start) + 1:end]
-    return len(text.split())
+    n = len(text.split())
+    zpath = TEXTS / str(book_id) / f"pg{book_id}-h.zip"
+    if n < 500 and zpath.exists():    # a text that's only a cover for the HTML (Haeckel's Evolution of Man)
+        with zipfile.ZipFile(zpath) as zf:
+            name = next((x for x in zf.namelist() if x.endswith((".html", ".htm"))), None)
+            if name:
+                page = zf.read(name).decode("utf-8", "replace")
+                page = re.sub(r"(?s)<(head|style|script)\b.*?</\1>|<[^>]+>", " ", page)
+                n = max(n, len(page.split()))
+    return n
 
 
 def save_cover(book_id, force):
@@ -194,9 +205,9 @@ def load_catalog():
 def build(rows, catalog, force_covers=False):
     books, order = {}, []
     for r in rows:
-        if r["check_translator"] == "yes":
-            continue
         book_id = int(r["gutenberg_id"])
+        if r["check_translator"] == "yes" or book_id in NOT_DRIPS:
+            continue
         entry = catalog.get(book_id, {})
         shelves, subjects = entry.get("bookshelves", []), entry.get("subjects", [])
         year, text = blurb((entry.get("summaries") or [""])[0])

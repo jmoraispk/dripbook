@@ -11,7 +11,7 @@ paragraphs() finds headings, verse and indented quotations). Kinds: h1..h4 (or h
 unknown level), p, quote, verse, note, and pg (a printed page number, never shown).
 
 cut_blocks() skips short front matter (title page, contents, preface) so part 1 opens on chapter
-one, then splits the book into parts of about WORDS_PER_MINUTE x pace words, at paragraph breaks,
+one; when it can't find chapter one it still skips the title page and contents. Then it splits the book into parts of about WORDS_PER_MINUTE x pace words, at paragraph breaks,
 starting a new part at a chapter heading when the current one is long enough. A part ends only where
 a sentence does, so a paragraph that runs on into a quotation or a poem isn't left hanging; past
 LONGEST x the target it ends anyway (verse without stops, chess notation).
@@ -107,13 +107,15 @@ def paragraphs(text):
     return out
 
 
-SENTENCE_END = re.compile(r"""[.!?…][\s"'”’)\]*_\d]*$""")
+# A stop, then closing quotes, brackets or a footnote number: '…forth.”[351]' ends a sentence.
+SENTENCE_END = re.compile(r"""[.!?…](?:[\s"'”’)\]*_\d]|\[\d{1,4}\]|\[[A-Z]\])*$""")
 LONGEST = 1.5
 
 
 def ends_sentence(part):
-    """Whether a part's last text ends a sentence (a part of only headings or pages counts)."""
-    last = next((t for k, t in reversed(part) if k not in ("pg", "img") and not is_heading(k)), None)
+    """Whether a part's last text ends a sentence (a part of only headings or pages counts). Footnotes
+    follow the paragraph that cites them, so it's that paragraph's end that counts."""
+    last = next((t for k, t in reversed(part) if k not in ("pg", "img", "note") and not is_heading(k)), None)
     return last is None or bool(SENTENCE_END.search(plain(last).rstrip()))
 
 
@@ -132,6 +134,60 @@ def split_long(block, size):
     if cur:
         pieces.append((kind, " ".join(cur)))
     return pieces
+
+
+# What Gutenberg's volunteers add to a book: their notes and credits, never the author's text.
+EDITORIAL = re.compile(r"transcriber(?:['’]s|s['’]?)?\s+notes?\b|e-?text prepared by|project gutenberg|gutenberg\.org|"
+                       r"pgdp\.net|distributed proofread|proofreading team", re.I)
+CREDIT_LINE = re.compile(r"^\W*(produced by|e-?text prepared by|html version by|transcribed from|this e-?book was|"
+                         r"digitized by)\b", re.I)
+CAST = re.compile(r"\b(persons|characters|dramatis|cast)\b", re.I)
+
+
+def drop_editorial(blocks):
+    """The book without its transcriber's notes and e-text credits: a section headed Transcriber's
+    Note(s) up to the next heading, and any short block that is a note or credit line."""
+    out, skipping = [], False
+    for kind, text in blocks:
+        p = plain(text).strip()
+        if is_heading(kind):
+            skipping = bool(re.match(r"^\W*transcriber", p, re.I))
+            if skipping or CREDIT_LINE.match(p):
+                continue
+        elif skipping or kind != "pg" and words(text) < 150 and (EDITORIAL.search(p) or CREDIT_LINE.match(p)):
+            continue
+        out.append((kind, text))
+    return out
+
+
+def title_page_end(blocks):
+    """Index past the title page and contents at the start: short lines (title, 'by', publisher,
+    edition) and headings with no text under them. It stops at the first paragraph of some length,
+    verse or a quotation, a heading with text under it, or a play's list of characters."""
+    total, seen, i = sum(words(t) for _, t in blocks), 0, 0
+    while i < len(blocks):
+        kind, text = blocks[i]
+        if kind != "pg":
+            if is_heading(kind):
+                if CAST.search(plain(text)):
+                    break
+                after, j = 0, i + 1
+                while j < len(blocks) and not is_heading(blocks[j][0]) and after < 150:
+                    after += words(blocks[j][1])
+                    j += 1
+                if after >= 150:
+                    break
+            elif kind != "p" or words(text) > 12:
+                break
+            seen += words(text)
+            if seen > FRONT_MATTER_SHARE * total:
+                return 0
+        i += 1
+    if i >= len(blocks):
+        return 0
+    while i > 0 and blocks[i - 1][0] == "pg":   # keep the page number the text starts on
+        i -= 1
+    return i
 
 
 def story_start(blocks):
@@ -169,7 +225,10 @@ def cut_blocks(found, pace, skip_front=True):
     """Split a book's blocks into parts, each a list of (kind, html) blocks, from chapter one on."""
     target = WORDS_PER_MINUTE * pace
     blocks = []
-    for b in found[story_start(found) if skip_front else 0:]:
+    start = story_start(found) if skip_front else 0
+    if skip_front and not start:
+        start = title_page_end(found)
+    for b in found[start:]:
         blocks.extend(split_long(b, target) if words(b[1]) > 1.5 * target else [b])
 
     parts, cur, n = [], [], 0

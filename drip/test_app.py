@@ -653,5 +653,14 @@ class LibraryTest(unittest.TestCase):
         self.assertEqual(books["1342"]["title"], "Pride and Prejudice")
 
 
+class ReadBookTest(unittest.TestCase):
+    def test_a_plain_text_that_only_points_to_the_html_uses_the_html(self):
+        cover = "*** START OF THE PROJECT GUTENBERG EBOOK X ***\n\nThis text file is only a cover for the html file.\n\n*** END"
+        page = "<h2>CHAPTER I.</h2>" + "<p>" + "word " * 800 + "end.</p>"
+        found = app.read_book(cover, page)
+        self.assertEqual(found[0], ("h2", "CHAPTER I."))
+        self.assertGreater(sum(len(t.split()) for _, t in found), 800)
+
+
 if __name__ == "__main__":
     unittest.main()

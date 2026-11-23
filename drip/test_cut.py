@@ -1,7 +1,8 @@
 """Offline tests for drip/cut.py. Run: python3 -m unittest discover -s drip"""
 import unittest
 
-from cut import clean, context, cut, cut_blocks, metadata, paragraphs, part_heading, part_words, to_html, to_text, words
+from cut import (clean, context, cut, cut_blocks, drop_editorial, ends_sentence, metadata, paragraphs, part_heading,
+                 part_words, to_html, to_text, words)
 from gutenberg_html import blocks
 
 RAW = """﻿The Project Gutenberg eBook of Test Book\r
@@ -120,9 +121,16 @@ class FrontMatterTest(unittest.TestCase):
         text = self.book().replace("CHAPTER I.\n\n" + prose(200), "BOOK I.\n\nCHAPTER I.\n\n" + prose(200), 1)
         self.assertEqual([t for _, t in cut(text, 5)[0][:2]], ["BOOK I.", "CHAPTER I."])
 
-    def test_long_front_matter_is_kept(self):
+    def test_long_front_matter_is_kept_but_not_the_title_page(self):
         parts = cut(self.book(front_words=1500), 5)   # over 5% of the book: likely the author's prologue
-        self.assertEqual(parts[0][0], ("p", "MY NOVEL"))
+        self.assertEqual(parts[0][0], ("h", "PREFACE."))
+        self.assertEqual(part_words(parts[0]) >= 1500, True)
+
+    def test_a_plays_characters_are_kept(self):
+        front = ["THE PLAY", "by A. Writer", "London: Methuen"]
+        blocks = [("p", t) for t in front] + [("h2", "THE PERSONS OF THE PLAY"), ("p", "Lord Goring"),
+                                              ("p", "Mabel Chiltern")] + [("p", prose(200))] * 30
+        self.assertEqual(cut_blocks(blocks, 5)[0][0], ("h2", "THE PERSONS OF THE PLAY"))
 
     def test_skip_front_false_keeps_everything(self):
         self.assertEqual(cut(self.book(), 5, skip_front=False)[0][0], ("p", "MY NOVEL"))
@@ -198,6 +206,41 @@ class ContextTest(unittest.TestCase):
     def test_no_pages(self):
         parts = cut(prose(100), 5)
         self.assertIsNone(context(parts, 1)["pages"])
+
+
+class SweepFixesTest(unittest.TestCase):
+    """What the quality sweep of the library found (2026-11-22)."""
+
+    def test_a_footnote_number_after_the_stop_ends_a_sentence(self):
+        self.assertTrue(ends_sentence([("p", "no strength to bring forth.[351]")]))
+        self.assertTrue(ends_sentence([("p", "as he said.”[A]")]))
+        self.assertFalse(ends_sentence([("p", "and then [12] he")]))
+
+    def test_page_markers_in_any_span_are_page_numbers(self):
+        page = ('<p>One two <span class="tei tei-pb" id="p4">[pg 4]</span> three.</p>'
+                '<p><span class="left">[Page v]</span></p><p>See <a href="#p4">[pg 4]</a>.</p>')
+        self.assertEqual(blocks(page), [("p", "One two three."), ("pg", "4"), ("pg", "v"), ("p", "See [pg 4].")])
+
+    def test_a_footnote_follows_the_paragraph_that_cites_it(self):
+        page = ('<p>First<a class="fnanchor" href="#Footnote_1">[1]</a> paragraph.</p><p>Second paragraph.</p>'
+                '<div class="footnote"><p><a id="Footnote_1" href="#FNanchor_1">[1]</a> The note.</p>'
+                '<p>Its second paragraph.</p></div>'
+                '<div class="footnote"><p><a id="Footnote_2">[2]</a> Nothing cites this one.</p></div>')
+        self.assertEqual(blocks(page), [("p", "First[1] paragraph."), ("note", "[1] The note."),
+                                        ("note", "Its second paragraph."), ("p", "Second paragraph."),
+                                        ("note", "[2] Nothing cites this one.")])
+
+    def test_other_footnote_markup(self):
+        self.assertEqual(blocks('<p>Text<a href="#n1">1</a> here.</p><p>On.</p><div class="note"><a id="n1">1</a>. His brother.</div>'),
+                         [("p", "Text<sup>1</sup> here."), ("note", "1. His brother."), ("p", "On.")])
+        self.assertEqual(blocks('<p>Text<a href="#f1">[1]</a>.</p><p>On.</p><p><a id="f1"></a><b>Footnote 1:</b> Anson.</p>'),
+                         [("p", "Text[1]."), ("note", "<strong>Footnote 1:</strong> Anson."), ("p", "On.")])
+
+    def test_transcribers_notes_and_credits_go(self):
+        found = [("p", "E-text prepared by Chris and the Online Distributed Proofreading Team"),
+                 ("p", "Please see the Transcriber’s Notes at the end of this text."), ("h2", "CHAPTER I."),
+                 ("p", "It began."), ("h2", "Transcriber’s Notes"), ("p", "Fixed typos."), ("p", "More fixes.")]
+        self.assertEqual(drop_editorial(found), [("h2", "CHAPTER I."), ("p", "It began.")])
 
 
 if __name__ == "__main__":
