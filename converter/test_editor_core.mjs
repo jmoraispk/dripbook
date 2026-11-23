@@ -3,8 +3,67 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {createRequire} from "node:module";
+import {readFileSync} from "node:fs";
+import {createContext, runInContext} from "node:vm";
 
 const C = createRequire(import.meta.url)("../site/cuts-core.js");
+
+// Run the page's actual event handlers without loading PDF.js or rendering canvases.
+function editorPage(storage = new Map()) {
+  const elements = new Map();
+  const element = (selector) => {
+    if (!elements.has(selector)) elements.set(selector, {
+      hidden: true, listeners: new Map(),
+      addEventListener(type, listener) { this.listeners.set(type, listener); },
+    });
+    return elements.get(selector);
+  };
+  const context = createContext({
+    window: {DripbookCuts: C, addEventListener() {}},
+    document: {querySelector: element, addEventListener() {}},
+    location: {search: ""}, URLSearchParams,
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: (key) => storage.delete(key),
+    },
+  });
+  const html = readFileSync(new URL("../site/cuts.html", import.meta.url), "utf8");
+  runInContext(html.match(/<script type="module">([\s\S]*?)<\/script>/)[1], context);
+  runInContext("refresh = () => {};", context);
+  const state = context.window.dripbookEditor;
+  Object.assign(state, {plan: plan(), ...C.fromPlan(plan()), key: "book", mode: "plan"});
+  return {state, element, storage, run: (code) => runInContext(code, context)};
+}
+
+test("merging the last lesson with the previous one selects the merged lesson", () => {
+  const {state, element} = editorPage();
+  state.k = 1;
+  element("#panel").listeners.get("click")({target: {closest: () => ({dataset: {act: "merge-prev"}})}});
+  assert.equal(state.k, 0);
+  assert.equal(state.segs.length, 1);
+  assert.equal(state.segs[state.k].subject, "Chapter 1: Start");
+  assert.equal(state.undo.length, 1);
+});
+
+test("restores a draft when only the free lesson count changed", () => {
+  const first = editorPage();
+  first.element("#free").listeners.get("change")({target: {value: "2"}});
+  const reloaded = editorPage(first.storage);
+  reloaded.run("offerDraft()");
+  assert.equal(reloaded.element("#draft").hidden, false);
+  reloaded.element("#draft").onclick({target: {dataset: {act: "restore"}}});
+  assert.equal(reloaded.state.plan.settings.free_lessons, 2);
+  assert.equal(reloaded.element("#free").value, 2);
+  assert.equal(reloaded.state.saved, false);
+  assert.equal(reloaded.element("#draft").hidden, true);
+});
+
+test("does not offer an unchanged draft", () => {
+  const page = editorPage();
+  page.run("saveDraft(); offerDraft()");
+  assert.equal(page.element("#draft").hidden, true);
+});
 
 // Blocks on pages 1-3: a chapter heading, paragraphs, a list, code and a section heading.
 function book() {

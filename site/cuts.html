@@ -479,7 +479,9 @@ function saveDraft() {
 function offerDraft() {
   let draft = null;
   try { draft = JSON.parse(localStorage.getItem(S.key) || "null"); } catch {}
-  if (!draft || !Array.isArray(draft.segs) || JSON.stringify(draft.segs) === JSON.stringify(S.segs)) return;
+  if (!draft || !Array.isArray(draft.segs)) return;
+  if (JSON.stringify(draft.segs) === JSON.stringify(S.segs) &&
+      (draft.free == null || draft.free === S.plan.settings.free_lessons)) return;
   const valid = draft.segs.every((s, i) => s.a === (i ? draft.segs[i - 1].b + 1 : 0)) && draft.segs.at(-1).b === S.blocks.length - 1;
   if (!valid) return;
   const el = $("#draft");
@@ -848,7 +850,14 @@ $("#panel").addEventListener("click", (e) => {
   if (!act) return;
   if (act === "prev") step(-1);
   if (act === "next") step(1);
-  if (act === "merge-prev" && apply(C.merge(S.segs, S.k - 1))) { S.k -= 1; refresh(true); }
+  if (act === "merge-prev") {
+    const next = C.merge(S.segs, S.k - 1);
+    if (next) {
+      S.k -= 1;
+      apply(next);
+      refresh(true);
+    }
+  }
   if (act === "merge-next") apply(C.merge(S.segs, S.k));
   if (act === "skip") apply(C.setKind(S.segs, S.k, "skip", S.blocks));
   if (act === "lesson") apply(C.setKind(S.segs, S.k, "lesson", S.blocks));
