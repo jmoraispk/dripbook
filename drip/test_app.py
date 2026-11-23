@@ -13,6 +13,7 @@ from http.server import HTTPServer
 from unittest import mock
 
 import app
+import scan
 import web
 from app import Drip, Problem
 
@@ -767,6 +768,13 @@ class ScanTest(unittest.TestCase):
             with self.assertRaises(app.Problem) as e:
                 d.scan_find("ia:big00")
             self.assertIn(word, e.exception.message)
+
+    def test_short_names(self):
+        for long, short in (("The Philosophy of the Beautiful ...: Being Outlines of the History", "The Philosophy of the Beautiful"),
+                            ("The philosophy of the beautiful : being outlines / by William Knight.", "The philosophy of the beautiful"),
+                            ("Miss Marjoribanks", "Miss Marjoribanks")):
+            self.assertEqual(scan.short_title(long), short)
+        self.assertEqual(scan.short_author("Oliphant, Mrs. (Margaret), 1828-1897"), "Mrs. Oliphant")
 
     def test_only_archive_ids(self):
         d, _ = make_scan()

@@ -429,8 +429,8 @@ def short_title(title):
     """'The philosophy of the beautiful : being outlines… / by William Knight.' -> 'The philosophy of the beautiful'"""
     main = re.split(r"\s+/\s+", title or "")[0]
     main = re.sub(r"\s*\[[^\]]*\]", "", main)
-    main = re.split(r"\s+:\s+|\s*;\s+", main)[0]
-    return re.sub(r"[\s.,;:]+$", "", main).strip() or (title or "").strip()
+    main = re.split(r"\s*:\s+|\s*;\s+", main)[0]
+    return re.sub(r"[\s.,;:…]+$", "", main).strip() or (title or "").strip()
 
 
 def short_author(author):
