@@ -1804,11 +1804,11 @@ def main(argv=None):
                                       "or <book-slug>-pymupdf with --engine pymupdf)")
     parser.add_argument("--title", help="book title, if the PDF doesn't say")
     parser.add_argument("--author", help="author name, if the PDF doesn't say")
-    parser.add_argument("--price", type=int, default=49, help="course price in USD for the call to action (default: 49)")
-    parser.add_argument("--cta-url", default="{{CHECKOUT_URL}}", help="link for the call to action")
-    parser.add_argument("--image-base-url", default="",
+    parser.add_argument("--price", type=int, help="course price in USD for the call to action (default: the plan's, or 49)")
+    parser.add_argument("--cta-url", help="link for the call to action (default: the plan's, or {{CHECKOUT_URL}})")
+    parser.add_argument("--image-base-url",
                         help="public URL the figures/ folder will be uploaded to, e.g. a Vercel Blob prefix "
-                             "(default: relative links, which work for local previews)")
+                             "(default: the plan's, or relative links for local previews)")
     parser.add_argument("--blocks", action="store_true", help="print the numbered blocks and exit")
     claude = parser.add_argument_group("planning with Claude (off unless --claude; sends the book's text to Anthropic)")
     claude.add_argument("--claude", action="store_true", help="let Claude choose lesson boundaries and subject lines")
@@ -1879,9 +1879,13 @@ def main(argv=None):
         if raw is None:  # --dry-run
             return 0
 
-    free = args.free or (raw.get("settings") or {}).get("free_lessons") or 3   # the cut editor saves its choice
-    settings = {"free_lessons": min(free, len(raw.get("lessons") or [])) or free, "price": args.price,
-                "cta_url": args.cta_url, "image_base_url": args.image_base_url, "title": args.title, "author": args.author,
+    saved_settings = raw.get("settings") or {}
+    free = args.free or saved_settings.get("free_lessons") or 3   # the cut editor saves its choice
+    settings = {"free_lessons": min(free, len(raw.get("lessons") or [])) or free,
+                "price": args.price if args.price is not None else saved_settings.get("price", 49),
+                "cta_url": args.cta_url if args.cta_url is not None else saved_settings.get("cta_url", "{{CHECKOUT_URL}}"),
+                "image_base_url": args.image_base_url if args.image_base_url is not None else saved_settings.get("image_base_url", ""),
+                "title": args.title, "author": args.author,
                 "fallback_title": pdf.stem, "source": source}
     course, errors = build_course(raw, doc, settings)
     if errors:

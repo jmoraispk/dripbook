@@ -644,6 +644,46 @@ class FigureRenderTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
+    def render_saved_settings(self, settings, *overrides):
+        raw = sample_book()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            pdf = tmp / "book.pdf"
+            pdf.write_bytes(b"%PDF")
+            ids = [b["id"] for b in convert.parse(raw)["blocks"]]
+            plan = {"settings": settings, "lessons": [
+                {"first_block": ids[0], "last_block": ids[-1], "subject": "One"}]}
+            plan_path = tmp / "plan.json"
+            plan_path.write_text(json.dumps(plan))
+            out = tmp / "out"
+            with mock.patch.object(convert, "read_pdf", return_value=raw), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(convert.main([str(pdf), "--plan", str(plan_path), "--out", str(out), *overrides]), 0)
+            return json.loads((out / "lessons.json").read_text()), (out / "day-01.html").read_text()
+
+    def test_render_preserves_saved_payment_and_image_settings(self):
+        for price in (19, 0):
+            with self.subTest(price=price):
+                course, page = self.render_saved_settings({
+                    "price": price, "cta_url": "https://checkout.example/course",
+                    "image_base_url": "https://images.example/course/"})
+                self.assertEqual(course["settings"]["price"], price)
+                self.assertEqual(course["settings"]["cta_url"], "https://checkout.example/course")
+                self.assertEqual(course["settings"]["image_base_url"], "https://images.example/course/")
+                self.assertIn('href="https://checkout.example/course"', page)
+
+    def test_cli_settings_override_saved_settings_including_zero_and_empty_urls(self):
+        course, page = self.render_saved_settings(
+            {"price": 19, "cta_url": "https://old.example/pay", "image_base_url": "https://old.example/images/"},
+            "--price", "0", "--cta-url", "", "--image-base-url", "")
+        self.assertEqual(course["settings"]["price"], 0)
+        self.assertEqual(course["settings"]["cta_url"], "")
+        self.assertEqual(course["settings"]["image_base_url"], "")
+
+    def test_render_without_saved_settings_uses_original_defaults(self):
+        course, page = self.render_saved_settings({})
+        self.assertEqual(course["settings"], {
+            "free_lessons": 1, "price": 49, "cta_url": "{{CHECKOUT_URL}}", "image_base_url": ""})
+
     def test_render_from_plan_without_api(self):
         raw = sample_book()
         with tempfile.TemporaryDirectory() as tmp:
