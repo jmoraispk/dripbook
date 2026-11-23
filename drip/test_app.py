@@ -662,5 +662,119 @@ class ReadBookTest(unittest.TestCase):
         self.assertGreater(sum(len(t.split()) for _, t in found), 800)
 
 
+SENTENCE = ("The beautiful is that which pleases the mind without a concept, and the history of the theory "
+            "of beauty shows how slowly the thinkers of each age came to see it plainly").split()
+
+
+def djvu(pages=24, words=None):
+    """A scan's OCR as the Archive serves it: pages of paragraphs of lines of words."""
+    words = words or SENTENCE
+    out, k = ["<DjVuXML><BODY>"], 0
+    for page in range(pages):
+        out.append("<OBJECT>")
+        if page % 8 == 0:
+            out.append(f'<PARAGRAPH><LINE><WORD coords="0,60,10,0">CHAPTER</WORD>'
+                       f'<WORD coords="0,60,10,0">{"I" * (page // 8 + 1)}.</WORD></LINE></PARAGRAPH>')
+        for _ in range(3):
+            out.append("<PARAGRAPH>")
+            for _ in range(6):
+                line = [words[(k + i) % len(words)] for i in range(10)]
+                k += 10
+                out.append("<LINE>" + "".join(f'<WORD coords="0,40,10,0">{w}</WORD>' for w in line) + "</LINE>")
+            out.append("</PARAGRAPH>")
+        out.append("</OBJECT>")
+    out.append("</BODY></DjVuXML>")
+    return "".join(out).encode()
+
+
+class FakeArchive:
+    def __init__(self, ocr=None, **info):
+        self.xml = ocr or djvu()
+        self.info = {"title": "The philosophy of the beautiful : being outlines / by William Knight.",
+                     "author": "Knight, William Angus, 1836-1916", "year": "1891", "rights": "",
+                     "xml": "x_djvu.xml", "xml_size": len(self.xml), "hosts": [], **info}
+        self.asked, self.downloads = 0, 0
+
+    def ia_files(self, identifier):
+        self.asked += 1
+        return dict(self.info)
+
+    def download_xml(self, identifier, info, timeout=60):
+        self.downloads += 1
+        return self.xml
+
+
+def make_scan(archive=None, redis=None):
+    d, clock, _ = make()
+    d.ia = archive or FakeArchive()
+    if redis:
+        d.redis = redis
+    return d, clock
+
+
+class ScanTest(unittest.TestCase):
+    def test_find_then_read_then_cached(self):
+        d, _ = make_scan()
+        found = d.scan_find("ia:philosophy00knig")
+        self.assertEqual((found["ready"], found["title"], found["author"]),
+                         (False, "The philosophy of the beautiful", "William Angus Knight"))
+        self.assertGreater(found["size"], 0)
+        seen = d.scan_preview("ia:philosophy00knig")
+        self.assertGreater(seen["words"], 3000)
+        self.assertGreater(seen["parts"]["5"], seen["parts"]["20"])
+        self.assertIn("beautiful", seen["first"]["html"])
+        self.assertEqual(d.ia.downloads, 1)
+
+        again, _ = make_scan(redis=d.redis)          # another visitor, another function instance
+        found = again.scan_find("ia:philosophy00knig")
+        self.assertTrue(found["ready"])
+        self.assertEqual(found["parts"], seen["parts"])
+        self.assertEqual((again.ia.asked, again.ia.downloads), (0, 0))
+
+    def test_start_a_scan_and_read_it(self):
+        d, clock = make_scan()
+        out = d.subscribe("me@example.com", "ia:philosophy00knig", 10, "https://x")
+        self.assertEqual(out["status"], "sent")
+        token = token_from(d.mail.sent[-1], "confirm")
+        _, outcome = d.confirm(token)
+        self.assertEqual(outcome, "sent")
+        self.assertIn("The philosophy of the beautiful, part 1 of", d.mail.sent[-1]["Subject"])
+
+    def test_only_scans_out_of_us_copyright(self):
+        archive = FakeArchive(year="1950")
+        d, _ = make_scan(archive)
+        with self.assertRaises(app.Problem) as e:
+            d.scan_find("ia:later00")
+        self.assertEqual(e.exception.status, 422)
+        self.assertIn("copyright", e.exception.message)
+        with self.assertRaises(app.Problem):
+            d.subscribe("me@example.com", "ia:later00", 10, "https://x")
+        self.assertEqual((archive.asked, archive.downloads), (1, 0), "the refusal is remembered")
+        ok, _ = make_scan(FakeArchive(year="1950", rights="NOT_IN_COPYRIGHT"))
+        self.assertFalse(ok.scan_find("ia:later00")["ready"])
+
+    def test_garbled_scans_are_refused(self):
+        # 3 words in 10 misread: each line and page survives the cleanup, but the book reads badly
+        mixed = [w if i % 10 < 7 else f"w{i}th0{i}t" for i, w in enumerate(SENTENCE * 10)]
+        d, _ = make_scan(FakeArchive(ocr=djvu(words=mixed)))
+        with self.assertRaises(app.Problem) as e:
+            d.scan_preview("ia:junk00")
+        self.assertIn("garbled", e.exception.message)
+
+    def test_too_big_or_no_text(self):
+        for info, word in (({"xml_size": app.MAX_SCAN_XML + 1}, "too long"), ({"xml": None}, "no text")):
+            d, _ = make_scan(FakeArchive(**info))
+            with self.assertRaises(app.Problem) as e:
+                d.scan_find("ia:big00")
+            self.assertIn(word, e.exception.message)
+
+    def test_only_archive_ids(self):
+        d, _ = make_scan()
+        for bad in ("hathi:mdp.39015", "ia:../etc", "7", ""):
+            with self.assertRaises(app.Problem) as e:
+                d.scan_find(bad)
+            self.assertEqual(e.exception.status, 400)
+
+
 if __name__ == "__main__":
     unittest.main()

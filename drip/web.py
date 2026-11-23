@@ -109,6 +109,15 @@ def request_book(req):
     return 200, JSON, json.dumps(out)
 
 
+def scan_get(req):
+    """GET /api/scan?id=ia:<identifier>&step=find, then &step=read: the site opens a scan in two steps, so it
+    can show how far along it is."""
+    d = drip(mail=False)
+    scan_id = req.query.get("id", "")
+    out = d.scan_preview(scan_id) if req.query.get("step") == "read" else d.scan_find(scan_id)
+    return 200, JSON, json.dumps(out)
+
+
 def subscribe_own(req):
     data = req.data()
     out = drip().subscribe_own(data.get("email"), data.get("title"), data.get("lessons"), req.base(),

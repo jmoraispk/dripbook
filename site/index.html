@@ -67,6 +67,10 @@
       <p class="by" id="dlg-by"></p>
       <div class="tags" id="dlg-tags"></div>
       <p class="blurb" id="dlg-blurb"></p>
+      <div class="prep" id="dlg-prep" hidden>
+        <div class="prep-bar" role="progressbar" aria-label="Reading the scan" aria-valuemin="0" aria-valuemax="100"><span></span></div>
+        <p class="prep-say" role="status"></p>
+      </div>
       <div class="plan" id="dlg-plan">
         <p id="dlg-days"></p>
         <div class="pace" role="group" aria-label="Minutes a day">
@@ -75,6 +79,10 @@
           <button type="button" data-pace="20" aria-pressed="false">20 min</button>
         </div>
       </div>
+      <details class="first" id="dlg-first" hidden>
+        <summary>Read part 1 first</summary>
+        <div class="first-text"></div>
+      </details>
       <form class="join" id="join">
         <label class="sr" for="email">Your email</label>
         <input id="email" type="email" placeholder="Your email" autocomplete="email" required>

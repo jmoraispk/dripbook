@@ -4,6 +4,8 @@ State lives in Upstash Redis (REST API), email goes through Postmark:
   sub:{token}           JSON subscription: email, book, pace, tz, status, sent, last_day, base
   who:{email}:{book}    token of that reader's subscription to that book
   active                set of tokens that get a part every morning
+  scan:{v}:ia:{id}      an Internet Archive scan read when a reader opened it: {title, author, year, blocks},
+                        kept 90 days; scan-bad:{v}:ia:{id} says why one can't be read (7 days)
   blocks:{v}:{id}       a book as cut.py blocks (JSON, gzip, base64), read from Gutenberg's mirror:
                         the HTML edition, or the plain text when the HTML is missing or garbled.
                         v is READER: raise it when reading changes, so books are read again. Kept 90 days
@@ -41,6 +43,7 @@ from urllib.parse import urlencode, urlsplit
 
 import cut
 import gutenberg_html
+import scan
 
 ROOT = Path(__file__).resolve().parent.parent
 LIBRARY = ROOT / "site" / "library.json"
@@ -58,6 +61,10 @@ BLOCKS_DAYS = 90
 MIN_WORDS = 500          # below this the "book" is a stub (music, scans), not a drip
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SCAN_ID = re.compile(r"^(ia|hathi):[A-Za-z0-9._$:/+-]{1,120}$")   # a scanned book picked from search
+# An Internet Archive scan a reader can start at once: we read its OCR when they open it (Drip.scan).
+SCAN_LIVE = re.compile(r"^ia:[A-Za-z0-9._-]{1,100}$")
+MAX_SCAN_XML = 40_000_000         # the OCR file, uncompressed: ~450,000 words; 17 MB (200,000) reads in ~5 s
+BAD_SCAN_SECONDS = 7 * 24 * 3600
 TIME_ZONE = re.compile(r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$")   # an IANA name like Europe/Lisbon
 # Book requests: a Redis list with one entry per request. Only an identical request from the
 # same address within 10 minutes (a double click) is dropped.
@@ -199,13 +206,15 @@ def today():
 # --- The drip ---------------------------------------------------------------------------
 class Drip:
     def __init__(self, redis, mail, env=None, fetch=fetch_gutenberg, library=None, clock=time.time, day=today,
-                 fetch_html=fetch_gutenberg_html, blob=None):
+                 fetch_html=fetch_gutenberg_html, blob=None, ia=scan):
         self.redis, self.mail, self.fetch, self.fetch_html, self.blob = redis, mail, fetch, fetch_html, blob
+        self.ia = ia   # ia_files(identifier) and download_xml(identifier, info): scan.py, or a fake in tests
         self.env = os.environ if env is None else env
         self.library = load_library() if library is None else library
         self.clock, self.day = clock, day
         self.broadcast = self.env.get("POSTMARK_BROADCAST_STREAM") or "broadcast-1"
         self._books = {}
+        self._scan_files = {}
 
     @classmethod
     def from_env(cls, mail=True):
@@ -244,6 +253,8 @@ class Drip:
                     "parts": [[tuple(b) for b in part] for part in data["parts"]]}
             self._books[book_id] = book
             return book
+        if SCAN_LIVE.match(book_id):
+            return self.scan(book_id)
         info = self.library[book_id]
         raw = self.redis("GET", f"blocks:{READER}:{book_id}")
         if raw:
@@ -265,6 +276,85 @@ class Drip:
         self._books[book_id] = book
         return book
 
+    # Scans from the Internet Archive, read when a reader opens one
+    def scan_files(self, scan_id):
+        """The Archive's record of a scan, once we know we may send it and can read it; else a Problem
+        whose message the site shows next to its Request button."""
+        if not SCAN_LIVE.match(scan_id or ""):
+            raise Problem(400, "We can't read that scan here. Request it instead.")
+        if scan_id in self._scan_files:
+            return self._scan_files[scan_id]
+        bad = self.redis("GET", f"scan-bad:{READER}:{scan_id}")
+        if bad:
+            raise Problem(422, bad)
+        try:
+            info = self.ia.ia_files(scan_id[3:])
+        except (OSError, ValueError, KeyError) as e:
+            raise Problem(502, "The Internet Archive didn't answer. Try again in a minute.") from e
+        if not scan.us_public_domain(info):
+            self.refuse(scan_id, "This scan may still be in copyright, so we can't send it yet. Request it and we'll check.")
+        if not info.get("xml"):
+            self.refuse(scan_id, "This scan has no text we can read. Request it and we'll look for another copy.")
+        if info.get("xml_size", 0) > MAX_SCAN_XML:
+            self.refuse(scan_id, "This scan is too long for us to read here. Request it and we'll prepare it.")
+        self._scan_files[scan_id] = info
+        return info
+
+    def refuse(self, scan_id, message):
+        self.redis("SET", f"scan-bad:{READER}:{scan_id}", message, "EX", BAD_SCAN_SECONDS)
+        raise Problem(422, message)
+
+    def scan(self, scan_id):
+        """{'title', 'author', 'year', 'blocks'} for an Internet Archive scan: from the cache, or its OCR read
+        and cleaned now (a few seconds)."""
+        if scan_id in self._books:
+            return self._books[scan_id]
+        raw = self.redis("GET", f"scan:{READER}:{scan_id}") if SCAN_LIVE.match(scan_id or "") else None
+        if raw:
+            book = unpack(raw)
+        else:
+            info = self.scan_files(scan_id)
+            try:
+                xml = self.ia.download_xml(scan_id[3:], info, timeout=40)
+            except (OSError, ValueError) as e:
+                raise Problem(502, "We couldn't download this scan just now. Try again in a minute.") from e
+            try:
+                blocks = scan.scan_blocks(scan.scan_pages(xml))
+            except scan.ET.ParseError:
+                self.refuse(scan_id, "This scan's text is damaged. Request it and we'll look for another copy.")
+            if sum(cut.words(t) for _, t in blocks) < MIN_WORDS:
+                self.refuse(scan_id, "This scan has too little text to make a drip. Request it and we'll take a look.")
+            if not scan.readable(blocks):
+                self.refuse(scan_id, "This scan's text came out too garbled to read well. Request it and we'll clean it by hand.")
+            book = {"title": scan.short_title(info["title"]) or scan_id[3:], "author": scan.short_author(info["author"]),
+                    "year": info.get("year", ""), "blocks": blocks}
+            packed = pack(book)
+            if len(packed) > MAX_OWN_BYTES:
+                self.refuse(scan_id, "This scan is too long for us to keep. Request it and we'll prepare it.")
+            self.redis("SET", f"scan:{READER}:{scan_id}", packed, "EX", BLOCKS_DAYS * 86400)
+        book = {**book, "scan": True, "blocks": [tuple(b) for b in book["blocks"]]}
+        self._books[scan_id] = book
+        return book
+
+    def scan_find(self, scan_id):
+        """The first, quick step of opening a scan: its preview if we've read it before, else its record and the
+        size of its OCR file, so the site can tell how long reading it will take."""
+        if SCAN_LIVE.match(scan_id or "") and self.redis("GET", f"scan:{READER}:{scan_id}"):
+            return {"ready": True, **self.scan_preview(scan_id)}
+        info = self.scan_files(scan_id)
+        return {"ready": False, "id": scan_id, "title": scan.short_title(info["title"]),
+                "author": scan.short_author(info["author"]), "year": info.get("year", ""), "size": info.get("xml_size", 0)}
+
+    def scan_preview(self, scan_id):
+        """What the site shows before a reader starts a scan: how long it is at each pace, and part 1."""
+        book = self.scan(scan_id)
+        parts = {p: cut.cut_blocks(book["blocks"], p) for p in cut.PACES}
+        first = parts[10][0]
+        return {"id": scan_id, "title": book["title"], "author": book["author"], "year": book["year"],
+                "words": sum(cut.words(t) for _, t in book["blocks"]),
+                "parts": {str(p): len(v) for p, v in parts.items()},
+                "first": {"heading": cut.plain(cut.part_heading(first) or ""), "html": cut.to_html(first)}}
+
     def parts(self, sub):
         book = self.book(sub["book"])
         if "parts" in book:
@@ -282,7 +372,7 @@ class Drip:
         book_id = str(book_id or "").strip()
         if len(email) > 254 or not EMAIL.match(email):
             raise Problem(400, "That email address doesn't look right.")
-        if book_id not in self.library:
+        if book_id not in self.library and not SCAN_LIVE.match(book_id):
             raise Problem(400, "We don't have that book.")
         try:
             pace = int(pace)
