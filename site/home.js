@@ -49,6 +49,9 @@
   var far = {};              // a query's scan searches: {ia, hathi}, each 'searching', 'error', 'off' or a list
   var farTimer = null, farNext = '';
   var scans = [];            // the scans listed on screen, for their Request buttons
+  var only = '', onlyFor = '';  // the one library the results are narrowed to ('' for all), and for which query
+  var folded = {};           // libraries whose list the reader folded away, by name
+  var allCopies = false;     // list every copy of a scan, not one per book
   var pace = 10;
   var view = $('#view');
   var dialog = $('#book-dialog');
@@ -227,31 +230,35 @@
     }
     var f = far[key] || (farNext === key ? { ia: 'searching', hathi: HATHI ? 'searching' : 'off' } : null);
     var found = scanRows(f, ids, more);
+    if (onlyFor !== key) { only = ''; onlyFor = key; }
+    var counts = { lib: ids.length, gut: more.length, ia: found.ia.length, hathi: found.hathi.length };
+    var narrow = only && counts[only] ? only : '';
+    function show(k) { return !narrow || narrow === k; }
 
     view.textContent = '';
     var head = el('div', { class: 'view-head' });
     head.appendChild(el('h1', null, 'Results for “' + q.trim() + '”'));
     view.appendChild(head);
     view.appendChild(progress(q, f, [
-      ['Your library', ids.length, 'to start now'],
-      ['Project Gutenberg', cat ? more.length : 'searching', 'to request'],
-      ['Internet Archive', f ? (Array.isArray(f.ia) ? found.ia.length : f.ia) : 'idle', 'to request'],
-      ['HathiTrust', !HATHI ? 'off' : f ? (Array.isArray(f.hathi) ? found.hathi.length : f.hathi) : 'idle', 'to request']
-    ]));
-    if (ids.length) {
+      ['Your library', ids.length, 'to start now', 'lib'],
+      ['Project Gutenberg', cat ? more.length : 'searching', 'to request', 'gut'],
+      ['Internet Archive', f ? (Array.isArray(f.ia) ? found.ia.length : f.ia) : 'idle', 'to request', 'ia'],
+      ['HathiTrust', !HATHI ? 'off' : f ? (Array.isArray(f.hathi) ? found.hathi.length : f.hathi) : 'idle', 'to request', 'hathi']
+    ], narrow));
+    if (ids.length && show('lib')) {
       view.appendChild(el('h2', { class: 'hits-h' }, 'Start now'));
       grid('Books to start now', ids);
     }
-    if (more.length || found.ia.length || found.hathi.length) {
+    if ((more.length && show('gut')) || (found.ia.length && show('ia')) || (found.hathi.length && show('hathi'))) {
       var sec = el('section', { class: 'asks' });
       sec.appendChild(el('h2', null, 'Books you can request'));
       sec.appendChild(el('p', null, 'We haven’t made these into drips yet. Request one and we’ll email you when it’s ready.'));
       scans = found.ia.concat(found.hathi);
-      if (more.length) askList(sec, 'Project Gutenberg', null, more.map(function (b) {
+      if (more.length && show('gut')) askList(sec, 'Project Gutenberg', null, more.map(function (b) {
         return { title: b[1], by: b[2], attr: 'data-ask', id: b[0] };
       }));
-      if (found.ia.length) askList(sec, 'Internet Archive', 'Scanned pages, so they take longer: we clean up the text first.', found.ia.map(scanItem));
-      if (found.hathi.length) askList(sec, 'HathiTrust', 'Scanned pages from university libraries. These take longest: we find a copy we can read, then clean it up.', found.hathi.map(scanItem));
+      if (found.ia.length && show('ia')) askList(sec, 'Internet Archive', 'Scanned pages, so they take longer: we clean up the text first.', found.ia.map(scanItem), found.copies.ia, q);
+      if (found.hathi.length && show('hathi')) askList(sec, 'HathiTrust', 'Scanned pages from university libraries. These take longest: we find a copy we can read, then clean it up.', found.hathi.map(scanItem), found.copies.hathi, q);
       view.appendChild(sec);
     }
     var busy = !cat || (f && (f.ia === 'searching' || f.hathi === 'searching'));
@@ -271,7 +278,8 @@
   }
 
   // Where the search has looked: one line per library, and a bar while any is still answering.
-  function progress(q, f, rows) {
+  // A library with results is a button: it narrows the results to that library, and pressed again shows them all.
+  function progress(q, f, rows, narrow) {
     var box = el('div', { class: 'sources', id: 'sources' });
     var done = rows.filter(function (r) { return typeof r[1] === 'number' || r[1] === 'error'; }).length;
     var live = rows.filter(function (r) { return r[1] !== 'off' && r[1] !== 'idle'; }).length;
@@ -284,12 +292,20 @@
     var list = el('ul');
     rows.forEach(function (r) {
       var n = r[1], state = typeof n === 'number' ? 'done' : n;
-      var li = el('li', { class: state });
-      li.appendChild(el('b', null, r[0]));
-      li.appendChild(document.createTextNode(
+      var li = el('li', { class: state + (narrow && narrow !== r[3] ? ' dim' : '') });
+      var label = el(state === 'done' && n ? 'button' : 'span', { class: 'source-name' });
+      label.appendChild(el('b', null, r[0]));
+      label.appendChild(document.createTextNode(
         state === 'done' ? (n ? n.toLocaleString('en') + ' ' + r[2] : 'none') :
         state === 'searching' ? 'searching…' : state === 'error' ? 'didn’t answer' :
         state === 'off' ? 'coming soon' : 'not searched'));
+      if (label.tagName === 'BUTTON') {
+        label.type = 'button';
+        label.setAttribute('aria-pressed', String(narrow === r[3]));
+        label.title = narrow === r[3] ? 'Show every library' : 'Show only ' + r[0];
+        label.onclick = function () { only = narrow === r[3] ? '' : r[3]; showSearch(q); };
+      }
+      li.appendChild(label);
       list.appendChild(li);
     });
     box.appendChild(list);
@@ -418,9 +434,10 @@
     }
     return out;
   }
-  // A query's scans, with copies of the same book and books we already list taken out.
+  // A query's scans, with copies of the same book and books we already list taken out (unless the reader asked
+  // for every copy), and how many such copies each library had.
   function scanRows(f, ids, more) {
-    var out = { ia: [], hathi: [] };
+    var out = { ia: [], hathi: [], copies: { ia: 0, hathi: 0 } };
     if (!f) return out;
     var known = {};
     ids.forEach(function (id) { known[sameBook(lib.books[id].title, lib.books[id].author)] = 1; });
@@ -429,7 +446,9 @@
       if (!Array.isArray(f[k])) return;
       f[k].forEach(function (r) {
         var s = sameBook(r.title, r.author, r.volume);
-        if (!known[s] && r.title) { known[s] = 1; out[k].push(r); }
+        if (!r.title) return;
+        if (known[s]) out.copies[k]++;
+        if (!known[s] || allCopies) { known[s] = 1; out[k].push(r); }
       });
       out[k] = ranked(out[k], f.q || '');
     });
@@ -499,12 +518,27 @@
     return TOOL + '?' + new URLSearchParams(r.source.indexOf('ia:') === 0 ? { open: r.source }
       : { title: r.title, author: r.author || '' });
   }
-  function askList(parent, heading, blurb, rows) {
-    var box = el('div', { class: 'ask-source' });
+  // One library's list, which the reader can fold away. A scan library says how many copies of books already listed it hid,
+  // with a button to list them too.
+  function askList(parent, heading, blurb, rows, copies, q) {
+    var box = el('details', { class: 'ask-source' });
+    box.open = !folded[heading];
+    box.addEventListener('toggle', function () { folded[heading] = !box.open; });
+    var sum = el('summary');
     var h = el('h3', null, heading);
     h.appendChild(el('span', { class: 'ask-count' }, rows.length.toLocaleString('en')));
-    box.appendChild(h);
+    sum.appendChild(h);
+    box.appendChild(sum);
     if (blurb) box.appendChild(el('p', { class: 'ask-note' }, blurb));
+    if (copies) {
+      var note = el('p', { class: 'ask-copies' }, allCopies
+        ? 'Listing every copy, including ' + plural(copies, 'repeat') + ' of books already listed. '
+        : (copies === 1 ? '1 more copy' : copies + ' more copies') + ' of books already listed, hidden. ');
+      var again = el('button', { type: 'button' }, allCopies ? 'Hide repeats' : 'Show every copy');
+      again.onclick = function () { allCopies = !allCopies; showSearch(q); };
+      note.appendChild(again);
+      box.appendChild(note);
+    }
     var list = el('ul', { 'aria-label': 'Books to request from ' + heading });
     rows.slice(0, SHOWN).forEach(function (r) {
       var li = el('li');
