@@ -290,6 +290,18 @@ dialog::backdrop{background:rgba(4,7,14,.74);backdrop-filter:blur(3px)}
 .sources button.source-name[aria-pressed=true]{box-shadow:inset 0 0 0 1.5px var(--drop)}
 .sources button.source-name:focus-visible{outline:2px solid var(--drop);outline-offset:2px}
 .sources li.dim{opacity:.55}
+.sources li{display:flex;align-items:center;gap:8px}
+.src-icon{flex:none;width:12px;height:12px;box-sizing:border-box}
+.sources li.searching .src-icon{border:2px solid var(--rule);border-top-color:var(--drop);border-radius:50%;
+  animation:src-spin .8s linear infinite}
+.sources li.done .src-icon{width:6px;height:11px;margin:0 3px 3px;border:solid #6FCF97;border-width:0 2px 2px 0;
+  transform:rotate(45deg)}
+.sources li.error .src-icon{border-radius:50%;background:#E0795B}
+.sources li.off .src-icon,.sources li.idle .src-icon{border-radius:50%;border:1.5px solid var(--rule)}
+@keyframes src-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.sources li.searching .src-icon{animation-duration:2.4s}}
+.sources-done{margin-top:8px;font-size:.88rem;color:#6FCF97}
+.sources-done.partly{color:#E0795B}
 @media (prefers-reduced-motion:reduce){.ask-source>summary::before{transition:none}}
 .sources li.searching{color:var(--drop)}
 .sources li.off b,.sources li.idle b{color:var(--muted)}

@@ -68,7 +68,7 @@
   function mornings(book, minutes) {
     return book.words ? Math.max(1, Math.ceil(book.words / (WORDS_PER_MINUTE * (minutes || 10)))) : null;
   }
-  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+  function plural(n, word, many) { return n + ' ' + (n === 1 ? word : many || word + 's'); }
   function fold(s) { return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
 
   // --- Covers ---------------------------------------------------------------------------
@@ -277,7 +277,8 @@
     }
   }
 
-  // Where the search has looked: one line per library, and a bar while any is still answering.
+  // Where the search has looked: one line per library, each with a spinner while it answers and a check once it
+  // has, a bar while any is still answering, and a line saying so once all have.
   // A library with results is a button: it narrows the results to that library, and pressed again shows them all.
   function progress(q, f, rows, narrow) {
     var box = el('div', { class: 'sources', id: 'sources' });
@@ -305,10 +306,16 @@
         label.title = narrow === r[3] ? 'Show every library' : 'Show only ' + r[0];
         label.onclick = function () { only = narrow === r[3] ? '' : r[3]; showSearch(q); };
       }
+      li.appendChild(el('span', { class: 'src-icon', 'aria-hidden': 'true' }));
       li.appendChild(label);
       list.appendChild(li);
     });
     box.appendChild(list);
+    if (f && live && done === live) {
+      var failed = rows.filter(function (r) { return r[1] === 'error'; }).length;
+      box.appendChild(el('p', { class: 'sources-done' + (failed ? ' partly' : ''), role: 'status' },
+        failed ? 'Search finished, but ' + plural(failed, 'library', 'libraries') + ' didn’t answer.' : 'Search complete.'));
+    }
     if (!f && cat) {
       var btn = el('button', { type: 'button', class: 'look-further' }, 'Search the Internet Archive' + (HATHI ? ' and HathiTrust' : '') + ' too');
       btn.onclick = function () { searchFar(q); };
