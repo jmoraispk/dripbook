@@ -334,11 +334,21 @@
     return (s.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '').match(/[\p{L}\p{N}]+/gu) || [])
       .filter(function (w) { return !seen[w] && (seen[w] = 1); });
   }
-  function hathiSlice(v, file, at, len) {
+  // len bytes at an offset in one of the three files, from the ~1 MB piece that holds them
+  // (top.pieces: where each piece starts). An index from before pieces is one file each.
+  function hathiSlice(top, kind, at, len) {
+    var starts = top.pieces && top.pieces[kind], file = { dict: 'dict.txt', postings: 'postings', rows: 'rows.txt' }[kind];
+    if (starts) {
+      var i = 0;
+      while (i + 2 < starts.length && starts[i + 1] <= at) i++;
+      file = kind + '-' + ('00' + i).slice(-3) + (kind === 'postings' ? '.bin' : '.txt');
+      len = Math.min(len, starts[i + 1] - at);
+      at -= starts[i];
+    }
     var stop = new AbortController(), t = setTimeout(function () { stop.abort(); }, 20000);
     // no-store: the browser would otherwise queue requests for parts of the same file one behind another
-    return fetch(HATHI + v + '/' + file, { cache: 'no-store', signal: stop.signal,
-                                           headers: { Range: 'bytes=' + at + '-' + (at + len - 1) } })
+    return fetch(HATHI + top.v + '/' + file, { cache: 'no-store', signal: stop.signal,
+                                               headers: { Range: 'bytes=' + at + '-' + (at + len - 1) } })
       .then(function (r) {
         if (r.status !== 206) { stop.abort(); throw new Error('No byte ranges: ' + r.status); }  // never the whole file
         return r.arrayBuffer();
@@ -360,18 +370,18 @@
         var lo = 0, hi = top.words.length - 1;          // the last block starting at or before the word
         while (lo < hi) { var m = (lo + hi + 1) >> 1; if (top.words[m] <= w) lo = m; else hi = m - 1; }
         if (top.words[lo] > w) return null;
-        return hathiSlice(top.v, 'dict.txt', top.at[lo], top.len[lo]).then(function (b) {
+        return hathiSlice(top, 'dict', top.at[lo], top.len[lo]).then(function (b) {
           var line = text.decode(b).split('\n').filter(function (l) { return l.split('\t')[0] === w; })[0];
           return line ? line.split('\t').map(Number) : null;      // [, books, offset, size]
         });
       })).then(function (found) {
         if (found.some(function (x) { return !x; })) return [];
         return Promise.all(found.map(function (x) {
-          return hathiSlice(top.v, 'postings', x[2], x[3]).then(hathiIds);
+          return hathiSlice(top, 'postings', x[2], x[3]).then(hathiIds);
         })).then(function (lists) {
           var ids = lists.sort(function (a, b) { return a.length - b.length; }).reduce(hathiBoth).slice(0, 30);
           return Promise.all(ids.map(function (at) {
-            return hathiSlice(top.v, 'rows.txt', at, 1500).then(function (b) {
+            return hathiSlice(top, 'rows', at, 1500).then(function (b) {
               var x = text.decode(b).split('\n')[0].split('\t');   // htid, bib, year, pd, title, author
               return { source: 'hathi:' + x[0], title: x[4], author: x[5], year: x[2],
                        url: 'https://catalog.hathitrust.org/Record/' + x[1], from: 'HathiTrust' };

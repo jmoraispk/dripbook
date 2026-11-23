@@ -23,7 +23,7 @@ class Search(unittest.TestCase):
         with gzip.open(src, "wt", encoding="utf-8") as f:
             f.write("\n".join("\t".join(r) for r in [FIELDS] + BOOKS) + "\n")
         cls.out = Path(cls.tmp.name) / "out"
-        hs.build(src, cls.out, version="v1", block=60)    # small blocks, so words land in different ones
+        hs.build(src, cls.out, version="v1", block=60, piece=120)   # small blocks and pieces: words and books spread out
 
     @classmethod
     def tearDownClass(cls):
@@ -48,8 +48,13 @@ class Search(unittest.TestCase):
         self.assertEqual(top["v"], "v1")
         self.assertGreater(len(top["words"]), 3)
         self.assertEqual(top["words"], sorted(top["words"]))
-        size = (self.out / "v1" / "dict.txt").stat().st_size
-        self.assertEqual(top["at"][-1] + top["len"][-1], size, "the blocks cover the whole dictionary")
+        for kind, starts in top["pieces"].items():
+            sizes = [(self.out / "v1" / hs.piece_name(kind, i)).stat().st_size for i in range(len(starts) - 1)]
+            self.assertEqual([b - a for a, b in zip(starts, starts[1:])], sizes, kind)
+        self.assertGreater(len(top["pieces"]["rows"]), 3, "the books span several pieces")
+        for i in range(len(top["pieces"]["rows"]) - 1):
+            self.assertTrue((self.out / "v1" / hs.piece_name("rows", i)).read_bytes().endswith(b"\n"), "whole lines only")
+        self.assertEqual(top["at"][-1] + top["len"][-1], top["pieces"]["dict"][-1], "the blocks cover the dictionary")
         row = hs.search("jewel", self.out)[0]
         self.assertEqual((row["year"], row["url"]), ("1903", "https://catalog.hathitrust.org/Record/002"))
 
