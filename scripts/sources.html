@@ -89,13 +89,22 @@ a{color:var(--drop)}
   var book = null, pace = 10, found = null, shut = {};
 
   function fold(s) { return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
-  // Same title (its first four words, before any subtitle) and same first author's surname (site/home.js: sameBook).
+  // Same title (its first four words, before any subtitle), first author's surname and volume (site/home.js: sameBook).
+  var ROMAN = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10, xi: 11, xii: 12 };
+  function volumeOf(r) {
+    var m = String(r.volume || '').match(/\d+/) ||
+      fold(r.title).match(/\b(?:v|vol|volume|pt|part|book|bk)\.?\s*(\d+|[ivx]+)\b/) ||
+      fold(r.title).match(/\s(ii|iii|iv|vi|vii|viii|ix|xi|xii|[2-9])\s*[.)\]]*$/);
+    if (!m) return '';
+    var v = m[1] || m[0];
+    return String(ROMAN[v] || parseInt(v, 10) || '');
+  }
   function dupKey(r) {
     var t = fold(r.title).split(/\s*[:;\/(\[]|,\s+(?:being|or|with|containing|by|from|and other)\b/)[0];
     t = t.replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(function (w) { return w && !/^(the|a|an)$/.test(w); });
     var a = fold(r.author).split(';')[0].replace(/\([^)]*\)/g, ' ').replace(/\d.*$/, '');
     var names = (a.indexOf(',') >= 0 ? a.split(',')[0] : a).match(/[a-z]+/g) || [''];
-    return t.slice(0, 4).join(' ') + '|' + names[names.length - 1];
+    return t.slice(0, 4).join(' ') + '|' + names[names.length - 1] + '|' + volumeOf(r);
   }
   // Keeps the most downloaded copy of each.
   function dedupe(rows) {
@@ -144,7 +153,7 @@ a{color:var(--drop)}
     rows.forEach(function (r) {
       var li = el('li');
       li.appendChild(el('div', { class: 't' }, r.title));
-      li.appendChild(el('div', { class: 'm' }, [r.author, r.year, r.downloads ? r.downloads.toLocaleString('en') + ' downloads' : ''].filter(Boolean).join(' · ')));
+      li.appendChild(el('div', { class: 'm' }, [volumeOf(r) && 'Volume ' + volumeOf(r), r.author, r.year, r.downloads ? r.downloads.toLocaleString('en') + ' downloads' : ''].filter(Boolean).join(' · ')));
       var acts = el('div', { class: 'acts' });
       acts.appendChild(rightsTag(r.rights));
       if (readable) {
@@ -186,6 +195,21 @@ a{color:var(--drop)}
         pane.appendChild(el('p', { class: 'empty' }, 'Couldn’t open it: ' + err.message));
       });
   }
+
+  // Links from the site's search (site/home.js: toolLink): ?open=ia:… opens that scan; ?title=…&author=… looks
+  // for an Archive copy of a HathiTrust book and opens it.
+  (function () {
+    var p = new URLSearchParams(location.search);
+    if (p.get('open')) { $('#q').value = p.get('open'); openBook(p.get('open')); return; }
+    if (!p.get('title')) return;
+    $('#q').value = p.get('title');
+    $('#main').classList.add('reading');
+    $('#book').innerHTML = '<p class="empty">Looking for a readable copy on the Archive…</p>';
+    fetch('/twin?title=' + encodeURIComponent(p.get('title')) + '&author=' + encodeURIComponent(p.get('author') || '')).then(json).then(function (d) {
+      if (d.twin) openBook(d.twin.id);
+      else $('#book').innerHTML = '<p class="empty">No copy of this book on the Internet Archive, so we can’t read its text yet.</p>';
+    }).catch(function (err) { $('#book').innerHTML = ''; $('#book').appendChild(el('p', { class: 'empty' }, 'Lookup failed: ' + err.message)); });
+  })();
 
   function show(n) {
     var b = book, pane = $('#book');

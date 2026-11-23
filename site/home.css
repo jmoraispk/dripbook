@@ -248,7 +248,11 @@ dialog::backdrop{background:rgba(4,7,14,.74);backdrop-filter:blur(3px)}
 .asks h2{font:600 clamp(1.15rem,1.7vw,1.4rem)/1.2 var(--serif)}
 .asks>p{color:var(--muted);margin-top:4px;max-width:60ch}
 .asks ul{list-style:none;margin:14px 0 0;padding:0;border-top:1px solid var(--rule)}
-.asks li{border-bottom:1px solid var(--rule)}
+.asks li{border-bottom:1px solid var(--rule);display:flex;align-items:center}
+.asks li>button{flex:1;min-width:0}
+.ask-open{margin:0 4px 0 8px;padding:6px 14px;border-radius:999px;box-shadow:inset 0 0 0 1.5px var(--drop);
+  color:var(--drop);font-size:.875rem;font-weight:600;text-decoration:none}
+.ask-open:hover{background:var(--drop);color:var(--night)}
 .asks button{display:grid;grid-template-columns:1fr auto;gap:2px 16px;width:100%;padding:12px 4px;border:0;
   background:none;text-align:left;cursor:pointer}
 .asks button:hover{background:var(--night-2)}

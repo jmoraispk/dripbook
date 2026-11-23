@@ -61,6 +61,39 @@ class Blocks(unittest.TestCase):
         blocks = sources.scan_blocks(sources.scan_pages(xml))
         self.assertNotIn("INDEX", [t for _, t in blocks])
 
+    def test_running_heads_learned_from_the_book(self):
+        # 'The Philosophy of the Beautiful' opens most pages, with its page number misread ('io8'), and once
+        # after the page's first line of text; the chapter's own title isn't a running head.
+        pages = [page(["CHAPTER II"], ["PREHISTORIC ORIGINS", "Primitive Man"], [PROSE * 3 + "."])]
+        for n in ("io8", "110", "I12", "114"):
+            pages.append(page([PROSE * 2, f"{n} The Philosophy of the Beautiful CHAP.", PROSE * 2 + "."]))
+        blocks = sources.scan_blocks(sources.scan_pages(book(*pages)))
+        text = " ".join(t for _, t in blocks)
+        self.assertNotIn("Philosophy of the Beautiful", text)
+        self.assertEqual(blocks[:3], [("h", "CHAPTER II"), ("h", "PREHISTORIC ORIGINS"), ("h", "Primitive Man")])
+
+    def test_words_split_at_a_line_end_without_a_hyphen(self):
+        vocab = {"discussion": 3, "the": 9, "be": 4, "come": 2, "become": 2}
+        self.assertEqual(sources.join_lines(["a dis", "cussion of"], vocab), "a discussion of")
+        self.assertEqual(sources.join_lines(["may be", "come here"], vocab), "may be come here", "'come' is a word")
+
+    def test_ocr_noise_but_not_foreign_quotations(self):
+        vocab = {w: 3 for w in (PROSE + " the of it all a").split()}
+        self.assertTrue(sources.garbled("of it bszs bieiBx fiost^ tt£ie- sozvfvmg: aBa33ii2CfiiJ&: xse", vocab))
+        self.assertFalse(sources.garbled("Ich trage dich hinauf zum hochsten Schonen,", vocab))
+        self.assertFalse(sources.garbled("colourless, characterless residuum, like Winckelmann's", vocab))
+
+    def test_drops_the_publishers_list_at_the_end(self):
+        ads = [page(["The Fine Arts. By Professor Baldwin Brown, University of Edinburgh. 3s. 6d."]),
+               page(["The Elements of Ethics. By John H. Muirhead, Balliol College, Oxford. 3s."]),
+               page(["French Literature. By H. G. Keene, Wadham College, Oxford. 3s."]),
+               page(["Latin Literature. By J. W. Mackail, Balliol College, Oxford."])]
+        xml = book(*[page([PROSE * 4 + "."]) for _ in range(12)], *ads, page(["JOHN MURRAY, LONDON."]))
+        text = " ".join(t for _, t in sources.scan_blocks(sources.scan_pages(xml)))
+        self.assertNotIn("Baldwin", text)
+        self.assertNotIn("MURRAY", text)
+        self.assertIn("critics of the day", text)
+
     def test_lessons_use_the_editor_kinds(self):
         self.assertEqual(sources.as_lessons([[("h", "One"), ("p", "x"), ("pg", "3"), ("h3", "y")]]),
                          [[["h2", "One"], ["p", "x"], ["pg", "3"], ["h3", "y"]]])

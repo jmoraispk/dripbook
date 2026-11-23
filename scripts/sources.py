@@ -78,7 +78,7 @@ def search_ia(q, rows=30):
     query = (f"({words}) AND mediatype:texts AND (language:eng OR language:English) "
              f"AND (possible-copyright-status:NOT_IN_COPYRIGHT OR date:[1500-01-01 TO 1930-12-31])")
     data = get(IA_SEARCH, {"q": query, "fl[]": ["identifier", "title", "creator", "date", "downloads",
-                                                "possible-copyright-status", "contributor"],
+                                                "possible-copyright-status", "contributor", "volume"],
                            "sort[]": "downloads desc", "rows": rows, "output": "json"})
     out = []
     for d in data["response"]["docs"]:
@@ -87,7 +87,7 @@ def search_ia(q, rows=30):
                     "author": "; ".join(creator) if isinstance(creator, list) else creator,
                     "year": str(d.get("date", ""))[:4], "downloads": d.get("downloads", 0),
                     "rights": "Not in US copyright" if d.get("possible-copyright-status") == "NOT_IN_COPYRIGHT"
-                    else "Before 1931", "from": d.get("contributor", ""),
+                    else "Before 1931", "from": d.get("contributor", ""), "volume": d.get("volume", ""),
                     "url": f"https://archive.org/details/{d['identifier']}"})
     return out
 
@@ -305,9 +305,13 @@ def scan_pages(xml):
         notes = []
         while len(paras) > 1 and usual and paras[-1][1] < 0.8 * usual:
             notes.insert(0, paras.pop())
-        if notes and not re.match(r"^[\d*^†‡§|'\"]", notes[0][0][0]):
-            paras += notes   # small type, but not a footnote: a quotation or a caption
-            notes = []
+        # Footnotes start at the first small paragraph with a mark ('1', '*', '^'); small type above it is a
+        # quotation or a caption, and stays in the text.
+        k = next((i for i, (n, _) in enumerate(notes) if re.match(r"^[\d*^†‡§|'\"]", n[0])), len(notes))
+        paras += notes[:k]
+        notes = notes[k:]
+        while len(paras) > 1 and paras[-1][0][0].startswith("^"):
+            notes.insert(0, paras.pop())   # '^' is the OCR's footnote mark, whatever the type size
         notes = [n for n, _ in notes]
         pages.append(([p for p, _ in paras], notes))
     return pages
@@ -331,14 +335,120 @@ def running_head(paras):
     return 1, next((n for n in nums if n.isdigit()), nums[0])
 
 
-def join_lines(lines):
+def book_words(pages):
+    """How often each word appears inside a line (not first or last, where the OCR splits words) in the
+    whole scan: the book's own dictionary, for telling OCR noise and split words from real ones."""
+    counts = {}
+    for paras, notes in pages:
+        for p in paras + notes:
+            for ln in p:
+                for w in ln.split()[1:-1]:
+                    w = re.sub(r"^\W+|\W+$", "", w).lower()
+                    if w.isalpha():
+                        counts[w] = counts.get(w, 0) + 1
+    return counts
+
+
+def glue(left, right, vocab=None):
+    """Two pieces of one paragraph, across a line or page end. A word broken at the end is joined: 'pro-' +
+    'fessional', and, when the OCR lost the hyphen, 'dis' + 'cussion' if the book has 'discussion' but no 'cussion'."""
+    if not left:
+        return right
+    if left.endswith("-") and right[:1].islower() and not left.endswith("--"):
+        return left[:-1] + right
+    a, b = left.rsplit(" ", 1)[-1], re.sub(r"\W+$", "", right.split(" ", 1)[0])
+    if vocab and a.isalpha() and b.isalpha() and b.islower() and (a + b).lower() in vocab and b not in vocab:
+        return left + right
+    return f"{left} {right}"
+
+
+def misshapen(word):
+    """'t±De', 'aBa33ii2CfiiJ&', 'rn': not a word as printed."""
+    return bool(any(not ch.isalpha() and ch not in "'’-" for ch in word) or re.search(r"[a-z][A-Z]", word)
+                or not re.search(r"[aeiouyAEIOUYà-ÿ]", word))
+
+
+def noise(lines, vocab):
+    """(words, share the book uses elsewhere, share misshapen) for some lines of OCR text."""
+    words = [re.sub(r"^\W+|\W+$", "", w) for ln in lines for w in ln.split()]
+    words = [w for w in words if any(ch.isalpha() for ch in w)]
+    if not words:
+        return 0, 1, 0
+    known = sum(1 for w in words if w.isalpha() and vocab.get(w.lower(), 0) >= 2)
+    return len(words), known / len(words), sum(map(misshapen, words)) / len(words)
+
+
+def garbled(line, vocab):
+    """OCR noise rather than words: print showing through from the other side of the page, Greek read as Latin
+    letters. Fewer than a third of its words are ones the book uses elsewhere, and a third or more are misshapen.
+    A quotation in Latin or German has words the book doesn't use, but well-formed ones."""
+    n, known, odd = noise([line], vocab)
+    return n >= 4 and known < 1 / 3 and odd >= 0.35
+
+
+def smeared(paras, vocab):
+    """A page scanned badly (blurred, or two pages at once): its words are mostly noise. A good page that is
+    in another language, or the index, still has mostly well-formed words or the book's own."""
+    n, known, odd = noise([ln for p in paras for ln in p], vocab)
+    return n >= 40 and known < 0.6 and odd >= 0.3
+
+
+SMALL = {"a", "an", "as", "at", "be", "by", "do", "he", "if", "in", "is", "it", "me", "my", "no", "of", "on", "or",
+         "so", "to", "up", "us", "we"}
+PAGE_OCR = re.compile(r"^(?=.*\d)[\dilIoOTSyz©]{1,4}$|^[iloyz]{2,3}$|^\w{1,2}$")   # page numbers misread: 'I02', 'io8', 'lyo', 'h'
+HEAD_WORDS = re.compile(r"[a-z]{3,}")
+CHAPTER_LABEL = re.compile(r"^(chapter|chap|book|part|section|lecture|letter|canto)\b[\s.,]*([ivxlc]+|\d+)?[\s.]*$|^[ivxlc]+\.?$", re.I)
+
+
+def head_key(line):
+    """A line's words, for finding running heads: 'io The Philosophy of the Beautiful CHAP.' and '134 The Philosophy
+    of the Beautiful chap.' are both 'the philosophy the beautiful'. '' for lines that can't be a running head.
+    A short line in capitals with no page number ('FORMAL BEAUTY.') starts with '=': the first one in the book may
+    be the section's own title."""
+    if len(line.split()) > 10 or CHAPTER_LABEL.match(line.strip()):
+        return ""
+    key = " ".join(w for w in HEAD_WORDS.findall(line.lower()) if w not in ("chap", "chapter"))
+    if any(NUMBER.match(w.strip(".,'")) or PAGE_OCR.match(w.strip(".,'")) and w.strip(".,'").lower() not in SMALL
+           for w in line.split()):
+        return key   # a running head carries its page number, or what the OCR made of it ('io8', 'I02', 'h')
+    return "=" + key if key and line.isupper() and len(line.split()) <= 6 else ""
+
+
+def running_heads(pages):
+    """Running heads the book repeats: the first lines that open three or more pages."""
+    counts = {}
+    for paras, _ in pages:
+        for key in {head_key(ln) for ln in [ln for p in paras[:2] for ln in p][:2]}:
+            if key:
+                counts[key] = counts.get(key, 0) + 1
+    return {k for k, n in counts.items() if n >= 3}
+
+
+def drop_heads(paras, heads, met):
+    """A page without the running heads among its first three lines, which the OCR sometimes reads after the
+    first line of text. Returns (paras, the page number in the head or None). met: the '=' heads seen so far."""
+    seen, number, out = 0, None, []
+    for p in paras:
+        keep = []
+        for ln in p:
+            seen += 1
+            key = head_key(ln) if seen <= 3 else ""
+            if key in heads and not (key[0] == "=" and key not in met):
+                number = number or next((w for w in ln.split() if w.isdigit()), None)
+                continue
+            if key in heads:
+                met.add(key)
+            keep.append(ln)
+        if keep:
+            out.append(keep)
+    return out, number
+
+
+def join_lines(lines, vocab=None):
     """Lines of one paragraph as one string, joining words broken at the line end."""
     out = ""
     for ln in lines:
-        if out.endswith("-") and ln[:1].islower() and not out.endswith("--"):
-            out = out[:-1] + ln
-        else:
-            out = f"{out} {ln}" if out else ln
+        out = glue(out, ln, vocab)
     out = out.replace("^", "")                            # the OCR's mark for footnote references
     pieces = out.split('"')
     if len(pieces) % 2:                                    # quotes pair up: '" heady and high-minded. "' -> '"heady…"'
@@ -348,19 +458,68 @@ def join_lines(lines):
     return re.sub(r"\s+", " ", out).strip()
 
 
+def titles(paras):
+    """A page's paragraphs as (lines, is_title). A short block opening in capitals, like 'PREHISTORIC ORIGINS' /
+    'Primitive Man' under 'CHAPTER II', is a title and a subtitle: each line its own heading."""
+    for lines in paras:
+        caps = next((i for i, ln in enumerate(lines) if not ln.isupper()), len(lines))
+        if 0 < caps < len(lines) <= 3 and all(len(ln.split()) <= 6 and ln[:1].isupper() for ln in lines) \
+                and not any(re.search(r"[,;.]$", ln) for ln in lines):
+            yield lines[:caps], True
+            for ln in lines[caps:]:
+                yield [ln], True
+        else:
+            yield lines, False
+
+
+AD = re.compile(r"\b\d+s\.(\s*\d+d\.)?|\b(cr\.|crown|demy|fcap\.?)\s*8vo\b|\bpost free\b|^by the same author"
+                r"|(^|\.\s+)By\s+(the\s+)?[A-Z]")
+
+
+def skip_back(blocks):
+    """Leave out the publisher's lists of other books near the end: runs of short entries, most naming an
+    author or a price ('The Fine Arts. By Professor Baldwin Brown… 3s. 6d.'), four or more to a run."""
+    total, seen, cuts, run, ads, gap = sum(cut.words(t) for _, t in blocks), 0, [], None, 0, 0
+    for i, (kind, text) in enumerate(blocks + [("p", "x " * 100)]):   # a long last block closes the last run
+        seen += cut.words(text)
+        plain = cut.plain(text)
+        short = kind != "pg" and cut.words(plain) <= 70
+        if seen > 0.85 * total and short and AD.search(plain):
+            run = i if run is None else run
+            ads, gap = ads + 1, 0
+        elif run is not None and (kind == "pg" or short and gap < 3):
+            gap += kind != "pg"
+        else:
+            if run is not None and ads >= 4:
+                end = i - gap if i < len(blocks) else len(blocks)
+                cuts.append((run, end))
+            run, ads, gap = None, 0, 0
+    for a, b in reversed(cuts):
+        while a > 0 and blocks[a - 1][0] == "h":
+            a -= 1   # the list's own heading ('UNIVERSITY EXTENSION MANUALS')
+        blocks = blocks[:a] + blocks[b:]
+    return blocks
+
+
 def scan_blocks(pages):
     """cut.py blocks from a scan: running heads, page numbers and Google's pages dropped, paragraphs
     carried across page breaks, a pg block at the top of each printed page, and the index left out."""
     blocks, carry, pending, last_pg = [], None, [], 0
+    vocab, heads, met = book_words(pages), running_heads(pages), set()
     for paras, notes in pages:
         flat = " ".join(" ".join(p) for p in paras)
         if not paras or GOOGLE.search(flat) and len(flat) > 400:
             continue   # a blank page, or Google's notice at the front
-        paras = [[ln for ln in p if not GOOGLE.search(ln) or len(ln) > 80] for p in paras]
+        if smeared(paras, vocab):
+            continue
+        paras = [[ln for ln in p if (not GOOGLE.search(ln) or len(ln) > 80) and not garbled(ln, vocab)] for p in paras]
         paras = [p for p in paras if p]
+        notes = [n for n in ([ln for ln in n if not garbled(ln, vocab)] for n in notes) if n]
+        paras, number = drop_heads(paras, heads, met)
         if not paras:
             continue
-        drop, number = running_head(paras)
+        drop, found = running_head(paras)
+        number = number or found
         for _ in range(drop):
             paras[0] = paras[0][1:]
             paras = [p for p in paras if p]
@@ -379,25 +538,28 @@ def scan_blocks(pages):
             last_pg = int(number)
         elif number and number.isdigit() and not last_pg:
             last_pg = int(number)
-        for lines in paras:
-            text = join_lines(lines)
+        for lines, titled in titles(paras):
+            text = join_lines(lines, vocab)
             words = len(text.split())
-            if re.fullmatch(r"[IVXLC]{1,6}\.?|[A-Z]\.?", text):
-                continue   # a stray chapter number from a running head
+            if re.fullmatch(r"[IVXLC]{1,6}\.?|[A-Z]{1,2}\.?|CHA[PR]\.?,?(\s+\w{1,5}\.?)?", text):
+                continue   # a stray chapter number or 'CHAP.' from a running head
             letters = sum(ch.isalpha() for ch in text)
             if letters < 0.6 * len(text.replace(" ", "")):
                 continue   # OCR noise: a library stamp, a smudge, an ornament
-            heading = len(lines) <= 2 and words <= 12 and bool(cut.HEADING.match(text) or text.isupper() and words <= 8)
+            capitals = text.isupper() and words <= 8 and not re.match(r"^[\"'“‘]|^[A-Z]\.\s", text)   # not '"F. MAX MULLER."'
+            heading = titled or len(lines) <= 2 and words <= 12 and bool(cut.HEADING.match(text) or capitals)
             if not heading and carry is not None and (not END_SENTENCE.search(carry[1]) or text[:1].islower()):
                 # the same paragraph, over a page break or split line by line by the OCR
                 kind, prev = carry
-                joined = prev[:-1] + text if prev.endswith("-") and text[:1].islower() else f"{prev} {text}"
+                joined = glue(prev, text, vocab)
                 at = len(blocks) - 1 - blocks[::-1].index(carry)
                 blocks[at] = carry = (kind, joined)
                 continue
             blocks.extend(pending)   # the last page's footnotes, once its paragraph is finished
             pending = []
-            if heading:
+            if heading and blocks and blocks[-1][0] == "h" and re.search(r"\b(OF|AND|THE|IN|TO|FOR|ON|WITH)$", blocks[-1][1]):
+                blocks[-1] = ("h", f"{blocks[-1][1]} {html.escape(text)}")   # 'A MORE COMPLETE THEORY OF' / 'BEAUTY'
+            elif heading:
                 blocks.append(("h", html.escape(text)))
                 carry = None
             else:
@@ -405,7 +567,7 @@ def scan_blocks(pages):
                 blocks.append(carry)
         pending += [("note", html.escape(join_lines(n))) for n in notes]
     blocks.extend(pending)
-    blocks = skip_front(blocks)
+    blocks = skip_back(skip_front(blocks))
     # The index: the last heading named INDEX in the final tenth of the book, and all after it.
     total, seen = sum(cut.words(t) for _, t in blocks), 0
     for i, (kind, text) in enumerate(blocks):
@@ -445,8 +607,8 @@ def skip_front(blocks):
                         after += cut.words(blocks[k][1])
                     k += 1
                 if after >= 150:
-                    while j - 1 > i and blocks[j - 1][0] == "h":   # keep 'CHAPTER I' above 'PROLEGOMENA'
-                        j -= 1
+                    while j - 1 > i and blocks[j - 1][0] == "h" and CHAPTER_LABEL.match(cut.plain(blocks[j - 1][1])):
+                        j -= 1   # keep 'CHAPTER I' above 'PROLEGOMENA', but not the contents' last line
                     return blocks[:i] + blocks[j:]
             break
     return blocks

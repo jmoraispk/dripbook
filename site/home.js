@@ -33,6 +33,18 @@
   var HATHI_R2 = 'https://assets.dripbook.ai/hathi/';
   var HATHI = /^(localhost|127\.|10\.|192\.168\.)/.test(location.hostname)
     ? location.protocol + '//' + location.hostname + ':8765/hathi-search/' : HATHI_R2 || null;
+  // The sources tool (python3 scripts/sources.py serve) opens a scan and cuts it into parts, on our own machine.
+  // Its Open links show here when the site runs locally, or on the live site after visiting it once with ?editor
+  // (?editor=0 hides them again).
+  var TOOL = (function () {
+    var local = /^(localhost|127\.|10\.|192\.168\.)/.test(location.hostname), on = false;
+    try {
+      var m = location.search.match(/[?&]editor(?:=([^&]*))?/);
+      if (m) { if (m[1] === '0') localStorage.removeItem('dripbook-editor'); else localStorage.setItem('dripbook-editor', '1'); }
+      on = localStorage.getItem('dripbook-editor') === '1';
+    } catch (e) { /* storage blocked: local only */ }
+    return local ? 'http://' + location.hostname + ':8765/' : on ? 'http://localhost:8765/' : null;
+  })();
   var entered = '';          // the query the reader pressed Enter on: search the scans without waiting
   var far = {};              // a query's scan searches: {ia, hathi}, each 'searching', 'error', 'off' or a list
   var farTimer = null, farNext = '';
@@ -315,14 +327,14 @@
       ' AND mediatype:texts AND (language:eng OR language:English)' +
       ' AND (possible-copyright-status:NOT_IN_COPYRIGHT OR date:[1500-01-01 TO 1930-12-31])';
     var params = new URLSearchParams({ q: query, rows: '50', output: 'json' });
-    ['identifier', 'title', 'creator', 'date', 'downloads'].forEach(function (k) { params.append('fl[]', k); });
+    ['identifier', 'title', 'creator', 'date', 'downloads', 'volume'].forEach(function (k) { params.append('fl[]', k); });
     params.append('sort[]', 'downloads desc');
     return fetchJson(IA_SEARCH + '?' + params).then(function (d) {
       return d.response.docs.map(function (x) {
         var c = x.creator;
         return { source: 'ia:' + x.identifier, title: String([].concat(x.title)[0] || ''),
                  author: Array.isArray(c) ? c.join('; ') : String(c || ''), year: String(x.date || '').slice(0, 4),
-                 downloads: x.downloads || 0, url: 'https://archive.org/details/' + x.identifier, from: 'the Internet Archive' };
+                 downloads: x.downloads || 0, volume: x.volume, url: 'https://archive.org/details/' + x.identifier, from: 'the Internet Archive' };
       });
     });
   }
@@ -416,7 +428,7 @@
     ['ia', 'hathi'].forEach(function (k) {
       if (!Array.isArray(f[k])) return;
       f[k].forEach(function (r) {
-        var s = sameBook(r.title, r.author);
+        var s = sameBook(r.title, r.author, r.volume);
         if (!known[s] && r.title) { known[s] = 1; out[k].push(r); }
       });
       out[k] = ranked(out[k], f.q || '');
@@ -435,13 +447,24 @@
     return rows.map(function (r, i) { return [score(r), i, r]; })
       .sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; }).map(function (x) { return x[2]; });
   }
-  // Books are the same when the title (its first four words, before any subtitle) and the first author's surname are.
-  function sameBook(title, author) {
+  // Books are the same when the title (its first four words, before any subtitle), the first author's surname
+  // and the volume are: Part I and Part II of a book are two books.
+  function sameBook(title, author, volume) {
     var t = fold(title || '').split(/\s*[:;\/(\[]|,\s+(?:being|or|with|containing|by|from|and other)\b/)[0]
       .replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(function (w) { return w && !/^(the|a|an)$/.test(w); });
     var a = fold(author || '').split(';')[0].replace(/\([^)]*\)/g, ' ').replace(/\d.*$/, '');
     var names = (a.indexOf(',') >= 0 ? a.split(',')[0] : a).match(/[a-z]+/g) || [''];
-    return t.slice(0, 4).join(' ') + '|' + names[names.length - 1];
+    return t.slice(0, 4).join(' ') + '|' + names[names.length - 1] + '|' + volumeOf(title, volume);
+  }
+  // 'v.2', 'Vol. II', 'Part 2', 'The Philosophy Of The Beautiful Ii', or the Archive's volume field -> '2'; '' if none.
+  var ROMAN = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10, xi: 11, xii: 12 };
+  function volumeOf(title, volume) {
+    var m = String(volume || '').match(/\d+/) ||
+      fold(title || '').match(/\b(?:v|vol|volume|pt|part|book|bk)\.?\s*(\d+|[ivx]+)\b/) ||
+      fold(title || '').match(/\s(ii|iii|iv|vi|vii|viii|ix|xi|xii|[2-9])\s*[.)\]]*$/);
+    if (!m) return '';
+    var v = m[1] || m[0];
+    return String(ROMAN[v] || parseInt(v, 10) || '');
   }
   // 'The philosophy of the beautiful : being outlines… / by William Knight.' -> the title, and its subtitle
   // A very long title keeps its first phrase ('Gems for the fireside, comprising the most unique…').
@@ -465,8 +488,16 @@
     return a.trim();
   }
   function scanItem(r) {
-    return { title: scanTitle(r.title).title, by: [scanAuthor(r.author), r.year].filter(Boolean).join(', '),
-             attr: 'data-scan', id: scans.indexOf(r) };
+    var v = volumeOf(r.title, r.volume);
+    return { title: scanTitle(r.title).title, by: (v ? 'Volume ' + v + ' · ' : '') + [scanAuthor(r.author), r.year].filter(Boolean).join(', '),
+             attr: 'data-scan', id: scans.indexOf(r), open: toolLink(r) };
+  }
+  // The sources tool's page for a scan: an Archive copy opens at once; a HathiTrust one first looks for the
+  // same scan on the Archive.
+  function toolLink(r) {
+    if (!TOOL) return null;
+    return TOOL + '?' + new URLSearchParams(r.source.indexOf('ia:') === 0 ? { open: r.source }
+      : { title: r.title, author: r.author || '' });
   }
   function askList(parent, heading, blurb, rows) {
     var box = el('div', { class: 'ask-source' });
@@ -483,6 +514,8 @@
       btn.appendChild(el('span', { class: 'ask-by' }, r.by));
       btn.appendChild(el('span', { class: 'ask-go', 'aria-hidden': 'true' }, 'Request'));
       li.appendChild(btn);
+      if (r.open) li.appendChild(el('a', { class: 'ask-open', href: r.open, target: '_blank', rel: 'noopener',
+                                           'aria-label': 'Open ' + r.title + ' in the sources tool' }, 'Open'));
       list.appendChild(li);
     });
     box.appendChild(list);
