@@ -107,8 +107,9 @@ def paragraphs(text):
     return out
 
 
-# A stop, then closing quotes, brackets or a footnote number: '…forth.”[351]' ends a sentence.
-SENTENCE_END = re.compile(r"""[.!?…](?:[\s"'”’)\]*_\d]|\[\d{1,4}\]|\[[A-Z]\])*$""")
+# A stop, then closing quotes, brackets or a note or page marker: '…forth.”[351]', '…Church.[236:3]', '…age. {200b}'.
+SENTENCE_END = re.compile(r"""[.!?…](?:[\s\u2060"'”’)\]*_\d]|\[\d{1,4}(?::\d{1,3})?\]|\[[A-Z]\]|\(\d{1,3}\)|<\d{1,3}>"""
+                          r"""|\{\d{1,4}[a-z]?\})*$""")
 LONGEST = 1.5
 
 
@@ -119,21 +120,42 @@ def ends_sentence(part):
     return last is None or bool(SENTENCE_END.search(plain(last).rstrip()))
 
 
-def split_long(block, size):
-    """Split one huge paragraph at sentence ends into pieces of about size words."""
+# Where a paragraph may be split: after a stop (and any closing quote), or, inside a sentence too long
+# for one part, after a semicolon or colon. The space is kept, so verse keeps its line breaks.
+STOP_BREAK = re.compile(r"""((?:(?<=[.!?…])|(?<=[.!?…]["'”’)\]]))\s+)""")
+CLAUSE_BREAK = re.compile(r"((?<=[;:])\s+)")
+# A part that ends on this leads into what follows: '…and is as follows:' or '…reminded of—'.
+LEAD_IN = re.compile(r":\s*[—–-]*\s*$|\w[—–]\s*$")
+
+
+def split_long(block, size, longest=None):
+    """Split one huge paragraph into pieces of about size words, at sentence ends; at a semicolon or
+    colon only inside a sentence longer than longest words (Milton, Chapman's Homer)."""
     kind, text = block
-    sentences = re.split(r"(?<=[.!?;])\s+", text)
-    pieces, cur = [], []
-    for s in sentences:
-        cur.append(s)
-        joined = " ".join(cur)
+    bits = []
+    for i, s in enumerate(STOP_BREAK.split(text)):
+        if i % 2 or words(s) <= (longest or LONGEST * size):
+            bits.append(s)
+        else:
+            bits.extend(CLAUSE_BREAK.split(s))
+    # bits alternate text and the space after it: whole pieces end on a text bit.
+    pieces, cur = [], ""
+    for i, s in enumerate(bits):
+        cur += s
         # Never split inside <em>...</em>: the piece would open a tag the next one closes.
-        if words(joined) >= size and all(joined.count(f"<{t}>") == joined.count(f"</{t}>") for t in ("em", "strong")):
-            pieces.append((kind, joined))
-            cur = []
-    if cur:
-        pieces.append((kind, " ".join(cur)))
+        if i % 2 == 0 and words(cur) >= size and all(cur.count(f"<{t}>") == cur.count(f"</{t}>") for t in ("em", "strong")):
+            pieces.append((kind, cur.strip()))
+            cur = ""
+    if cur.strip():
+        pieces.append((kind, cur.strip()))
     return pieces
+
+
+def leads_in(part):
+    """Whether a part's last text introduces what comes next ('…is as follows:'), so the heading after
+    it (a story's title, a table, a poem) belongs with it."""
+    last = next((t for k, t in reversed(part) if k not in ("pg", "img", "note") and not is_heading(k)), None)
+    return last is not None and bool(LEAD_IN.search(plain(last).rstrip()))
 
 
 # What Gutenberg's volunteers add to a book: their notes and credits, never the author's text.
@@ -141,12 +163,25 @@ EDITORIAL = re.compile(r"transcriber(?:['’]s|s['’]?)?\s+notes?\b|e-?text pre
                        r"pgdp\.net|distributed proofread|proofreading team", re.I)
 CREDIT_LINE = re.compile(r"^\W*(produced by|e-?text prepared by|html version by|transcribed from|this e-?book was|"
                          r"digitized by)\b", re.I)
+INDEX = re.compile(r"^\W*((general|analytical|alphabetical|subject|topical)\s+)?index\b", re.I)
 CAST = re.compile(r"\b(persons|characters|dramatis|cast)\b", re.I)
 
 
 def drop_editorial(blocks):
-    """The book without its transcriber's notes and e-text credits: a section headed Transcriber's
-    Note(s) up to the next heading, and any short block that is a note or credit line."""
+    """The book without its transcriber's notes and e-text credits (a section headed Transcriber's
+    Note(s) up to the next heading, and any short block that is a note or credit line) and without
+    a closing index: nobody reads 'Stars, i, 4; and early man, i, 127' over breakfast."""
+    total, seen = sum(words(t) for _, t in blocks), 0
+    for i, (kind, text) in enumerate(blocks):
+        if seen > 0.75 * total and (is_heading(kind) or kind == "p" and words(text) <= 4) and INDEX.match(plain(text)):
+            j = i + 1   # the index runs to a footnote or the next heading that isn't another index or a letter ('B.')
+            while j < len(blocks) and blocks[j][0] != "note" and not (
+                    is_heading(blocks[j][0]) and not INDEX.match(plain(blocks[j][1]))
+                    and not re.match(r"^\W*[A-Z]\W*$", plain(blocks[j][1]))):
+                j += 1
+            blocks = blocks[:i] + blocks[j:]
+            break
+        seen += words(text)
     out, skipping = [], False
     for kind, text in blocks:
         p = plain(text).strip()
@@ -232,10 +267,19 @@ def cut_blocks(found, pace, skip_front=True):
         blocks.extend(split_long(b, target) if words(b[1]) > 1.5 * target else [b])
 
     parts, cur, n = [], [], 0
-    for b in blocks:
+    blocks.reverse()
+    while blocks:
+        b = blocks.pop()
         w = words(b[1])
-        new_chapter = is_heading(b[0]) and n >= 0.5 * target
+        new_chapter = is_heading(b[0]) and n >= 0.5 * target and not leads_in(cur)
         too_long = n + w > 1.2 * target and n >= 0.6 * target and (ends_sentence(cur) or n + w > LONGEST * target)
+        if cur and too_long and not new_chapter and not ends_sentence(cur) and b[0] in ("p", "quote", "verse"):
+            # Too big to take whole, but cut here and the part ends mid-sentence ('…It is called:'):
+            # take this paragraph up to a sentence end instead.
+            pieces = split_long(b, max(1, target - n), LONGEST * target)
+            if len(pieces) > 1:
+                blocks.extend(reversed(pieces))
+                continue
         if cur and (new_chapter or too_long):
             parts.append(cur)
             cur, n = [], 0

@@ -243,5 +243,70 @@ class SweepFixesTest(unittest.TestCase):
         self.assertEqual(drop_editorial(found), [("h2", "CHAPTER I."), ("p", "It began.")])
 
 
+class MidSentenceTest(unittest.TestCase):
+    """Parts that ended mid-sentence in the second sweep (2026-11-23)."""
+
+    def test_a_long_paragraph_splits_at_stops_not_semicolons(self):
+        text = " ".join(f"Line {i} of verse runs on; and on{'.' if i % 40 == 39 else ''}" for i in range(400))
+        parts = cut_blocks([("p", text)], 5)
+        self.assertGreater(len(parts), 1)
+        for part in parts:
+            self.assertTrue(part[-1][1].endswith("."), part[-1][1][-30:])
+
+    def test_a_sentence_too_long_for_a_part_still_splits_at_semicolons(self):
+        text = "; ".join(f"clause {i} goes on" for i in range(1000)) + "."
+        parts = cut_blocks([("p", text)], 5)
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(parts[0][-1][1].endswith(";"))
+
+    def test_split_verse_keeps_its_line_breaks(self):
+        verse = "\n".join(f"A line of verse number {i}{'.' if i % 4 == 3 else ','}" for i in range(600))
+        parts = cut_blocks([("verse", verse)], 5)
+        self.assertGreater(len(parts), 1)
+        self.assertIn("\n", parts[1][0][1])
+        self.assertEqual("\n".join(b[1] for part in parts for b in part), verse)
+
+    def test_a_lead_in_keeps_the_heading_it_introduces(self):
+        story = ("p", "word " * 1400 + "and is entitled:")
+        found = [("h2", "I."), story, ("h3", "II. KING BEAN."), ("p", "Once upon a time. " * 300),
+                 ("h2", "III."), ("p", "The end of it. " * 400)]
+        parts = cut_blocks(found, 10, skip_front=False)
+        self.assertEqual(parts[0][-1], ("p", "Once upon a time. " * 300))
+        self.assertEqual(parts[1][0], ("h2", "III."))
+
+    def test_more_note_and_page_markers_after_the_stop(self):
+        for end in ("the Church.[236:3]", "they govern themselves.”⁠[5]", "in feigned slumbers!’(3)",
+                    "at a very early age. {200b}", "of Chaucer. <3>"):
+            self.assertTrue(ends_sentence([("p", end)]), end)
+        self.assertFalse(ends_sentence([("p", "It is called (3)")]))
+
+    def test_a_lead_in_before_a_big_paragraph_takes_its_first_sentences(self):
+        found = [("p", "Some words here. " * 300), ("p", "and the tale is called:"),
+                 ("p", "There was once a baker. " * 200)]
+        parts = cut_blocks(found, 5, skip_front=False)
+        self.assertTrue(all(ends_sentence(p) for p in parts[:-1]), [p[-1][1][-30:] for p in parts])
+        self.assertEqual(parts[0][-2], ("p", "and the tale is called:"))
+        self.assertEqual(" ".join(b[1] for p in parts for b in p).split(), " ".join(t for _, t in found).split())
+
+    def test_a_closing_index_goes(self):
+        found = [("h2", "CHAPTER I."), ("p", "Text. " * 1000), ("h2", "INDEX"), ("p", "Stars, i, 4; and early man, i, 127"),
+                 ("p", "Zeus, ii, 3")]
+        self.assertEqual(drop_editorial(found), found[:2])
+        lettered = found[:3] + [("h3", "B."), ("p", "Bacon, 12"), ("h2", "APPENDIX"), ("p", "The original text.")]
+        self.assertEqual(drop_editorial(lettered), found[:2] + lettered[-2:], "what follows the index stays")
+        early = [("h2", "INDEX"), ("p", "Abel, 3")] + found[:2]
+        self.assertEqual(drop_editorial(early), early, "an index at the start isn't the closing one")
+
+    def test_a_footnote_label_alone_takes_the_next_block(self):
+        page = ('<p>Text<a href="#f2">2</a> here.</p><p>On.</p><div><a id="f2"><span>Footnote 2:</span></a></div>'
+                '<div>  cleaning</div><div><br></div><div><a href="#fr2">return</a></div>')
+        self.assertEqual(blocks(page), [("p", "Text<sup>2</sup> here."), ("note", "Footnote 2: cleaning"), ("p", "On.")])
+
+    def test_the_footnotes_line_over_moved_notes_goes(self):
+        page = ('<p>Text<a href="#n1">[1]</a>.</p><p>FOOTNOTES:</p><div class="footnote"><p><a id="n1">[1]</a> A note.</p></div>'
+                '<h2>CHAPTER 2.</h2><p>More.</p>')
+        self.assertEqual(blocks(page), [("p", "Text[1]."), ("note", "[1] A note."), ("h2", "CHAPTER 2."), ("p", "More.")])
+
+
 if __name__ == "__main__":
     unittest.main()

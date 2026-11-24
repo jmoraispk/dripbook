@@ -65,6 +65,7 @@ class Reader(HTMLParser):
         self.page = None       # a pagenum element being read: [attrs, text]
         self.tables = []       # open tables: where their blocks start, rows, rows that look like contents
         self.row = None        # the table row being read: did it link inside the book, its last cell
+        self.label = None      # where a note that is only a label ('Footnote 2:') is, waiting for its text
         self.ids = []          # ids and names seen since the last block: a note's, to match it to its marker
 
     # Context from the open elements
@@ -108,8 +109,16 @@ class Reader(HTMLParser):
         if kind.startswith("h") and len(visible.split()) > 40:
             kind = "p"  # an whole paragraph set in a heading tag
         ids, self.ids = self.ids, []
-        if kind == "p" and NOTE_TEXT.match(text):
+        label, self.label = self.label, None
+        if kind == "p" and label is not None:   # the text of a note whose label stood alone
+            k, t = self.out[label]
+            self.out[label] = (k, close_tags(t + " " + text))
+            return
+        m = NOTE_TEXT.match(text) if kind == "p" else None
+        if m:
             kind = "note"
+            if not re.sub(r"<[^>]+>", "", text[m.end():]).strip():
+                self.label = len(self.out)   # 'Footnote 2:' alone; its text is the next block (The Spectator)
         if kind == "note" and ids:
             text = "\x02" + " ".join(ids) + "\x02" + text
         self.out.append((kind, close_tags(text)))
@@ -275,6 +284,7 @@ def soften_drop_cap(text):
 
 CITES = re.compile(r"\x01([^\x01]*)\x01")
 NOTE_IDS = re.compile(r"^\x02([^\x02]*)\x02")
+NOTES_LABEL = re.compile(r"^\W*(foot|end)?notes?\W*$", re.I)
 
 
 def notes_in_place(found):
@@ -300,8 +310,8 @@ def notes_in_place(found):
         after.setdefault(host[j], []).append(j)
     out = []
     for i, block in enumerate(found):
-        if i in host:
-            continue
+        if i in host or i + 1 in host and NOTES_LABEL.match(re.sub(r"<[^>]+>", "", block[1])):
+            continue   # a moved note, or the 'FOOTNOTES:' line that stood over the moved notes
         out.append(block)
         out.extend(found[j] for j in after.get(i, []))
     return [(k, NOTE_IDS.sub("", CITES.sub("", t))) for k, t in out]
