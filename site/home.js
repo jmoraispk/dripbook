@@ -88,6 +88,69 @@
     }
     return box;
   }
+  // A book from another library: its cover from there, or the next place's if that one has none, or a cloth cover.
+  // A tiny image (a library's 'no cover' pixel) counts as none. A function in the list looks up more places to try.
+  function farArt(b, color, urls, eager) {
+    var box = el('div', { class: 'art' }), i = 0;
+    urls = urls.slice();
+    function next() {
+      var url = urls[i++];
+      if (typeof url === 'function') {
+        url().then(function (more) { urls.splice.apply(urls, [i, 0].concat(more)); }, function () {}).then(next);
+        return;
+      }
+      if (!url) { box.textContent = ''; box.appendChild(cloth(color, b)); return; }
+      var img = el('img', { alt: '', decoding: 'async', referrerpolicy: 'no-referrer' });
+      if (!eager) img.loading = 'lazy';
+      img.onerror = next;
+      img.onload = function () { if (img.naturalWidth < 40) next(); };
+      img.src = url;
+      box.textContent = '';
+      box.appendChild(img);
+    }
+    next();
+    return box;
+  }
+  // Where each library keeps a book's cover. HathiTrust's sits behind a check that may turn the browser away.
+  function coversOf(source, title, author) {
+    var id = source.slice(source.indexOf(':') + 1);
+    if (source.indexOf('gutenberg:') === 0) return ['https://www.gutenberg.org/cache/epub/' + id + '/pg' + id + '.cover.medium.jpg'];
+    if (source.indexOf('ia:') === 0) return ['https://archive.org/services/img/' + encodeURIComponent(id)];
+    if (source.indexOf('hathi:') === 0) return ['https://babel.hathitrust.org/cgi/imgsrv/cover?id=' + encodeURIComponent(id) + ';width=250',
+                                                function () { return sameEditionCovers(id); },
+                                                function () { return sameBookCovers(title, author); }];
+    return [];
+  }
+  // Any scan of the same title by the same author on the Archive, the most read first.
+  function sameBookCovers(title, author) {
+    var words = (fold(scanTitle(title || '').title).match(/[a-z0-9]+/g) || [])
+      .filter(function (w) { return !HATHI_SKIP.test(w); }).slice(0, 5);
+    var who = (fold(scanAuthor(author || '')).match(/[a-z]+/g) || []).pop();
+    if (!words.length || !who) return Promise.resolve([]);
+    var params = new URLSearchParams({ q: 'title:(' + words.join(' AND ') + ') AND creator:(' + who + ') AND mediatype:texts',
+                                       rows: '1', output: 'json' });
+    params.append('fl[]', 'identifier');
+    params.append('sort[]', 'downloads desc');
+    return fetchJson(IA_SEARCH + '?' + params).then(function (r) {
+      return r.response.docs.map(function (x) { return coversOf('ia:' + x.identifier)[0]; });
+    });
+  }
+  // A HathiTrust book's edition, by its OCLC numbers from HathiTrust's catalog: the same edition's scan on the
+  // Archive, then Open Library's cover of it.
+  function sameEditionCovers(htid) {
+    return fetchJson('https://catalog.hathitrust.org/api/volumes/brief/htid/' + encodeURIComponent(htid) + '.json').then(function (d) {
+      var oclcs = [];
+      for (var k in d.records || {}) oclcs = oclcs.concat(d.records[k].oclcs || []);
+      oclcs = oclcs.filter(function (n) { return /^\d+$/.test(n); }).slice(0, 5);
+      if (!oclcs.length) return [];
+      var library = oclcs.map(function (n) { return 'https://covers.openlibrary.org/b/oclc/' + n + '-M.jpg?default=false'; });
+      var params = new URLSearchParams({ q: 'oclc-id:(' + oclcs.join(' OR ') + ') AND mediatype:texts', rows: '2', output: 'json' });
+      params.append('fl[]', 'identifier');
+      return fetchJson(IA_SEARCH + '?' + params).then(function (r) {
+        return r.response.docs.map(function (x) { return coversOf('ia:' + x.identifier)[0]; }).concat(library);
+      }, function () { return library; });
+    });
+  }
   function cloth(id, b) {
     b = b || lib.books[id];
     var c = el('div', { class: 'cloth', style: '--c:' + COVER_COLORS[id % COVER_COLORS.length] });
@@ -259,7 +322,7 @@
         'so you can start it now.'));
       scans = found.ia.concat(found.hathi);
       if (more.length && show('gut')) askList(sec, 'Project Gutenberg', 'Clean text: open one and we cut it into parts in a second or two.', more.map(function (b) {
-        return { title: b[1], by: b[2], attr: 'data-ask', id: b[0], go: 'Open' };
+        return { title: b[1], by: b[2], attr: 'data-ask', id: b[0], color: b[0], covers: coversOf('gutenberg:' + b[0]) };
       }));
       if (found.ia.length && show('ia')) askList(sec, 'Internet Archive', 'Scanned pages: open one and we clean up its text in a few seconds, then you can start it.', found.ia.map(scanItem), found.copies.ia, q);
       if (found.hathi.length && show('hathi')) askList(sec, 'HathiTrust', 'Scanned pages from university libraries: open one and we find the same scan on the Internet Archive, then clean up its text.', found.hathi.map(scanItem), found.copies.hathi, q);
@@ -422,7 +485,7 @@
           return Promise.all(ids.map(function (at) {
             return hathiSlice(top, 'rows', at, 1500).then(function (b) {
               var x = text.decode(b).split('\n')[0].split('\t');   // htid, bib, year, pd, title, author
-              return { source: 'hathi:' + x[0], title: x[4], author: x[5], year: x[2],
+              return { source: 'hathi:' + x[0], title: x[4], author: x[5], year: x[2] === '9999' ? '' : x[2],   // 9999: unknown
                        url: 'https://catalog.hathitrust.org/Record/' + x[1], from: 'HathiTrust' };
             });
           }));
@@ -520,8 +583,11 @@
   function scanItem(r) {
     var v = volumeOf(r.title, r.volume);
     return { title: scanTitle(r.title).title, by: (v ? 'Volume ' + v + ' · ' : '') + [scanAuthor(r.author), r.year].filter(Boolean).join(', '),
-             attr: 'data-scan', id: scans.indexOf(r), open: toolLink(r),
-             go: 'Open' };
+             attr: 'data-scan', id: scans.indexOf(r), open: toolLink(r), color: hash(r.source), covers: coversOf(r.source, r.title, r.author) };
+  }
+  function hash(s) {                 // a steady number for a string, to pick a cloth colour
+    for (var i = 0, n = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) % 9973;
+    return n;
   }
   // The sources tool's page for a scan: an Archive copy opens at once; a HathiTrust one first looks for the
   // same scan on the Archive.
@@ -551,14 +617,15 @@
       note.appendChild(again);
       box.appendChild(note);
     }
-    var list = el('ul', { 'aria-label': 'Books to request from ' + heading });
-    rows.slice(0, SHOWN).forEach(function (r) {
+    var list = el('ul', { class: 'ask-grid', 'aria-label': 'Books to open from ' + heading });
+    rows.slice(0, SHOWN).forEach(function (r, i) {
       var li = el('li');
-      var btn = el('button', { type: 'button' });
+      var btn = el('button', { type: 'button', class: 'book', 'aria-label': 'Open ' + r.title + (r.by ? ', ' + r.by : '') });
       btn.setAttribute(r.attr, r.id);
-      btn.appendChild(el('span', { class: 'ask-title' }, r.title));
-      btn.appendChild(el('span', { class: 'ask-by' }, r.by));
-      btn.appendChild(el('span', { class: 'ask-go', 'aria-hidden': 'true' }, r.go || 'Request'));
+      btn.appendChild(farArt({ title: r.title, author: r.by }, r.color, r.covers, i < 12));
+      var meta = el('div', { class: 'meta' }, r.title);
+      meta.appendChild(el('span', null, r.by));
+      btn.appendChild(meta);
       li.appendChild(btn);
       if (r.open) li.appendChild(el('a', { class: 'ask-open', href: r.open, target: '_blank', rel: 'noopener',
                                            'aria-label': 'Open ' + r.title + ' in the sources tool' }, 'Tool'));
@@ -680,13 +747,17 @@
   // It is read and cleaned up there and then, with a bar while it is, and can start at once. A HathiTrust book is
   // read from the same scan on the Internet Archive. One we can't read is requested.
   function openScan(r) {
-    var t = scanTitle(r.title), n = 0;
-    for (var i = 0; i < r.source.length; i++) n = (n * 31 + r.source.charCodeAt(i)) % 9973;
+    var t = scanTitle(r.title), n = hash(r.source);
     var sub = t.sub ? t.sub.replace(/^./, function (c) { return c.toUpperCase(); }) + '. ' : '';
     var from = 'A scan of the ' + (r.year ? r.year + ' ' : '') + 'printing, from ' + r.from + '. ';
-    var book = { title: t.title, author: scanAuthor(r.author), source: r.source };
+    var book = { title: t.title, author: scanAuthor(r.author), source: r.source, covers: coversOf(r.source, r.title, r.author) };
     askWindow(book, n, sub + from + 'We clean up the scanned text before you start.', r.url);
     readScan(book);
+  }
+  function dialogArt(book, urls) {
+    var a = farArt(book, book.color, urls, true);
+    a.id = 'dlg-art';
+    $('#dlg-art').replaceWith(a);
   }
   function scanBits(on) {
     $('#dlg-prep').hidden = !on;
@@ -718,6 +789,7 @@
     scanCall(book.source, 'find').then(function (f) {
       if (!live()) return;
       if (f.via || gut) book.source = f.id;   // a HathiTrust book's Archive copy, or a Gutenberg book's own id
+      if (f.via) dialogArt(book, coversOf(f.id));   // the same scan's cover; HathiTrust's may have been turned away
       if (f.ready) return f;
       var mb = f.size / 1e6, secs = f.secs || 1.5 + f.size / 4e6, t0 = Date.now();
       at(15, gut ? 'Reading the book…' : 'Reading ' + (mb >= 1 ? Math.round(mb) + ' MB' : 'the pages') + ' of scanned text…');
@@ -779,9 +851,8 @@
   }
   function askWindow(book, color, blurb, link) {
     current = book;
-    var a = el('div', { class: 'art', id: 'dlg-art' });
-    a.appendChild(cloth(color, book));
-    $('#dlg-art').replaceWith(a);
+    book.color = color;
+    dialogArt(book, book.covers || coversOf(book.source));
     $('#dlg-title').textContent = book.title;
     $('#dlg-by').textContent = book.author;
     $('#dlg-tags').textContent = '';
