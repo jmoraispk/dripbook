@@ -475,7 +475,7 @@ async function scanCall(query, kind = "json") {
 }
 async function openScan(id, asPdf) {
   if (!asPdf) {
-    status("Cleaning up the scan’s text…");
+    status("Getting the book’s text ready…");
     return openText(await scanCall({id, step: "text"}));
   }
   status("Finding the scan’s PDF…");
@@ -536,7 +536,7 @@ async function openText(book) {
   status("");
   $("#start").hidden = true;
   for (const id of ["#tabs", "#undo", "#redo", "#split-long", "#mail-me"]) $(id).hidden = false;
-  $("#mail-rights").nextElementSibling.textContent = "I'll read this public-domain scan myself; I won't pass the lessons on as my own.";
+  $("#mail-rights").nextElementSibling.textContent = "I'll read this public-domain book myself; I won't pass the lessons on as my own.";
   shownPages = "";
   buildOverview();
   setView("overview");

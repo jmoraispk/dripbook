@@ -113,6 +113,8 @@ def scan_get(req):
     """GET /api/scan?id=ia:<identifier>&step=find, then &step=read: the site opens a scan in two steps, so it
     can show how far along it is. step=text and step=pdf[&at=] feed the editor (Drip.scan_api)."""
     ctype, body = drip(mail=False).scan_api(req.query)
+    if ctype == "application/pdf":   # a piece of a public-domain PDF never changes: let Vercel's CDN keep it
+        return 200, ctype, body, {"Cache-Control": "public, max-age=86400, s-maxage=2592000"}
     return 200, ctype, body
 
 
@@ -189,7 +191,7 @@ def handler_for(get=None, post=None, kind=HTML, limit=10_000):
             self.run("POST")
 
         def run(self, method):
-            fn = routes.get(method)
+            fn, extra = routes.get(method), []
             if not fn:
                 status, ctype, body = 405, JSON, json.dumps({"error": "method not allowed"})
             else:
@@ -199,12 +201,14 @@ def handler_for(get=None, post=None, kind=HTML, limit=10_000):
                     body = json.dumps({"error": "That's too much to send in one go. Try a shorter PDF."})
                 else:
                     body = self.rfile.read(length) if length else b""
-                    status, ctype, body = fn(Request(method, self.path, dict(self.headers), body))
+                    status, ctype, body, *extra = fn(Request(method, self.path, dict(self.headers), body))
+            headers = {"Cache-Control": "no-store", **(extra[0] if extra else {})}
             data = body if isinstance(body, bytes) else body.encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
+            for k, v in headers.items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(data)
 

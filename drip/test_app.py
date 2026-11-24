@@ -130,14 +130,16 @@ def make(env=None, page=None):
 
     def fetch(book_id):
         fetched.append(book_id)
-        return BOOK if book_id == "7" else "*** START OF THE PROJECT GUTENBERG EBOOK S ***\n\nMusic files.\n"
+        return BOOK if book_id in ("7", "77") else "*** START OF THE PROJECT GUTENBERG EBOOK S ***\n\nMusic files.\n"
 
     def fetch_html(book_id):
         if page is None or book_id != "7":
             raise OSError("404")
         return page
     d = Drip(FakeRedis(), FakeMail(), env=env or {}, fetch=fetch, library=LIBRARY,
-             clock=lambda: clock.now, day=lambda: clock.date, fetch_html=fetch_html)
+             clock=lambda: clock.now, day=lambda: clock.date, fetch_html=fetch_html,
+             catalog={"77": {"title": "A Book Outside the Library", "author": "Someone Long Dead"},
+                      "78": {"title": "Only Music", "author": ""}})
     return d, clock, fetched
 
 
@@ -551,7 +553,8 @@ class WebTest(unittest.TestCase):
                         "next": web.handler_for(get=web.next_get, post=web.next_post),
                         "cron": web.handler_for(get=web.cron, kind=web.JSON),
                         "request": web.handler_for(post=web.request_book, kind=web.JSON),
-                        "own": web.handler_for(post=web.subscribe_own, kind=web.JSON, limit=2000)}.items():
+                        "own": web.handler_for(post=web.subscribe_own, kind=web.JSON, limit=2000),
+                        "scan": web.handler_for(get=web.scan_get, kind=web.JSON)}.items():
             srv = HTTPServer(("127.0.0.1", 0), h)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             self.addCleanup(srv.server_close)
@@ -594,6 +597,18 @@ class WebTest(unittest.TestCase):
         status, body = self.call("next", data=f"t={token}")
         self.assertIn("Part 2", body)
         self.assertEqual(len(self.d.mail.sent), 3)
+
+    def test_scan_pieces_are_cached_but_answers_are_not(self):
+        self.d.ia = FakeArchive()
+        with urllib.request.urlopen(self.servers["scan"] + "?id=ia:philosophy00knig&step=pdf&at=0") as r:
+            self.assertEqual(r.headers["Content-Type"], "application/pdf")
+            self.assertIn("s-maxage", r.headers["Cache-Control"])
+            self.assertEqual(r.read(), self.d.ia.pdf[:app.PDF_PIECE])
+        with urllib.request.urlopen(self.servers["scan"] + "?id=gutenberg:77&step=find") as r:
+            self.assertEqual(r.headers["Cache-Control"], "no-store")
+            self.assertEqual(json.loads(r.read())["id"], "77")
+        status, body = self.call("scan", "?id=gutenberg:99999&step=find")
+        self.assertEqual(status, 400)
 
     def test_errors(self):
         status, body = self.call("subscribe", json_body={"email": "bad", "book": "7", "pace": 5})
@@ -728,6 +743,38 @@ def make_scan(archive=None, redis=None):
     if redis:
         d.redis = redis
     return d, clock
+
+
+class GutenbergLiveTest(unittest.TestCase):
+    def test_open_a_catalog_book_then_start_it(self):
+        d, clock, fetched = make()
+        found = d.scan_find("gutenberg:77")
+        self.assertEqual((found["ready"], found["id"], found["title"]), (False, "77", "A Book Outside the Library"))
+        seen = d.scan_preview("77")
+        self.assertEqual(seen["title"], "A Book Outside the Library")
+        self.assertGreaterEqual(seen["parts"]["5"], seen["parts"]["20"])
+        self.assertTrue(seen["first"]["html"])
+        self.assertTrue(d.scan_find("77")["ready"])
+        out = d.subscribe("me@example.com", "77", 10, "https://x")
+        self.assertEqual(out["status"], "sent")
+        text = d.scan_text("77")
+        self.assertTrue(text["blocks"] and text["starts"])
+        self.assertEqual(fetched.count("77"), 1)
+
+    def test_only_catalog_and_library_books(self):
+        d, _, _ = make()
+        for bad in ("gutenberg:99999", "99999", "gutenberg:", "gutenberg:7a"):
+            with self.assertRaises(app.Problem):
+                d.scan_find(bad)
+        with self.assertRaises(app.Problem):
+            d.subscribe("me@example.com", "99999", 10, "https://x")
+
+    def test_a_catalog_book_with_no_text_is_refused(self):
+        d, _, _ = make()
+        d.scan_find("78")
+        with self.assertRaises(app.Problem) as e:
+            d.scan_preview("78")
+        self.assertEqual(e.exception.status, 422)
 
 
 class ScanTest(unittest.TestCase):
@@ -866,7 +913,7 @@ class ScanTest(unittest.TestCase):
 
     def test_only_scan_ids(self):
         d, _ = make_scan()
-        for bad in ("hathi:..\\x", "gutenberg:7", "ia:../etc", "7", ""):
+        for bad in ("hathi:..\\x", "gutenberg:999", "ia:../etc", "999", ""):
             with self.assertRaises(app.Problem) as e:
                 d.scan_find(bad)
             self.assertEqual(e.exception.status, 400)

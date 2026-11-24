@@ -49,6 +49,10 @@ import scan
 
 ROOT = Path(__file__).resolve().parent.parent
 LIBRARY = ROOT / "site" / "library.json"
+# Every other English Gutenberg book we may send (scripts/build_catalog.py keeps only books whose every writer died
+# long enough ago for the EU, which covers the US too). One opens live like a scan: Drip.live_book.
+CATALOG = ROOT / "site" / "catalog.json"
+GUTENBERG_ID = re.compile(r"^(?:gutenberg:)?(\d{1,6})$")
 MIRROR = "https://gutenberg.pglaf.org/cache/epub/{id}/pg{id}.txt"
 MIRROR_HTML = "https://gutenberg.pglaf.org/cache/epub/{id}/pg{id}-images.html"
 # The HTML edition is used only if it has about as many words as the plain text; a few books
@@ -207,6 +211,12 @@ def load_library():
     return json.loads(LIBRARY.read_text(encoding="utf-8"))["books"]
 
 
+def load_catalog():
+    if not CATALOG.exists():
+        return {}
+    return {str(b[0]): {"title": b[1], "author": b[2]} for b in json.loads(CATALOG.read_text(encoding="utf-8"))["books"]}
+
+
 def today():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -214,15 +224,28 @@ def today():
 # --- The drip ---------------------------------------------------------------------------
 class Drip:
     def __init__(self, redis, mail, env=None, fetch=fetch_gutenberg, library=None, clock=time.time, day=today,
-                 fetch_html=fetch_gutenberg_html, blob=None, ia=scan):
+                 fetch_html=fetch_gutenberg_html, blob=None, ia=scan, catalog=None):
         self.redis, self.mail, self.fetch, self.fetch_html, self.blob = redis, mail, fetch, fetch_html, blob
         self.ia = ia   # ia_files(identifier) and download_xml(identifier, info): scan.py, or a fake in tests
         self.env = os.environ if env is None else env
         self.library = load_library() if library is None else library
+        self._catalog = catalog
         self.clock, self.day = clock, day
         self.broadcast = self.env.get("POSTMARK_BROADCAST_STREAM") or "broadcast-1"
         self._books = {}
         self._scan_files = {}
+
+    @property
+    def catalog(self):
+        """{id: {title, author}} for the Gutenberg books outside the library, read the first time it's needed."""
+        if self._catalog is None:
+            self._catalog = load_catalog()
+        return self._catalog
+
+    def gutenberg_id(self, book_id):
+        """'1342' for '1342' or 'gutenberg:1342', when it's a Gutenberg book we may send; else None."""
+        m = GUTENBERG_ID.match(str(book_id or ""))
+        return m.group(1) if m and (m.group(1) in self.library or m.group(1) in self.catalog) else None
 
     @classmethod
     def from_env(cls, mail=True):
@@ -263,7 +286,7 @@ class Drip:
             return book
         if SCAN_LIVE.match(book_id):
             return self.scan(book_id)
-        info = self.library[book_id]
+        info = self.library.get(book_id) or self.catalog[book_id]
         raw = self.redis("GET", f"blocks:{READER}:{book_id}")
         if raw:
             blocks = [tuple(b) for b in unpack(raw)]
@@ -386,6 +409,13 @@ class Drip:
         its Archive copy's id, which the site reads and starts."""
         if HATHI_ID.match(scan_id or ""):
             return {**self.scan_find(self.hathi_twin(scan_id)), "via": scan_id}
+        g = self.gutenberg_id(scan_id)
+        if g:   # a Gutenberg book outside the library: read from Gutenberg's mirror in a couple of seconds
+            if g in self._books or self.redis("GET", f"blocks:{READER}:{g}"):
+                return {"ready": True, **self.scan_preview(g)}
+            info = self.library.get(g) or self.catalog[g]
+            return {"ready": False, "id": g, "title": info["title"], "author": info.get("author", ""), "year": "",
+                    "size": 0, "secs": 3}
         if SCAN_LIVE.match(scan_id or "") and self.redis("GET", f"scan:{READER}:{scan_id}"):
             return {"ready": True, **self.scan_preview(scan_id)}
         info = self.scan_files(scan_id)
@@ -394,12 +424,10 @@ class Drip:
 
     def scan_preview(self, scan_id):
         """What the site shows before a reader starts a scan: how long it is at each pace, and part 1."""
-        if HATHI_ID.match(scan_id or ""):
-            scan_id = self.hathi_twin(scan_id)
-        book = self.scan(scan_id)
-        parts = {p: cut.cut_blocks(book["blocks"], p) for p in cut.PACES}
+        scan_id, book, skip = self.live_book(scan_id)
+        parts = {p: cut.cut_blocks(book["blocks"], p, skip) for p in cut.PACES}
         first = parts[10][0]
-        return {"id": scan_id, "title": book["title"], "author": book["author"], "year": book["year"],
+        return {"id": scan_id, "title": book["title"], "author": book["author"], "year": book.get("year", ""),
                 "words": sum(cut.words(t) for _, t in book["blocks"]),
                 "parts": {str(p): len(v) for p, v in parts.items()},
                 "first": {"heading": cut.plain(cut.part_heading(first) or ""), "html": cut.to_html(first)}}
@@ -408,20 +436,28 @@ class Drip:
         """A scan's cleaned text for the editor's text mode: its blocks [kind, html] and the block each part starts at,
         as the site would cut it. 'front' blocks come before the first part (title page, preface), which the
         site leaves out."""
-        if HATHI_ID.match(scan_id or ""):
-            scan_id = self.hathi_twin(scan_id)
-        book = self.scan(scan_id)
+        scan_id, book, skip = self.live_book(scan_id)
         blocks = book["blocks"]
-        front = cut.front_end(blocks)
-        parts = cut.cut_blocks(blocks, EDITOR_PACE)
+        front = cut.front_end(blocks) if skip else 0
+        parts = cut.cut_blocks(blocks, EDITOR_PACE, skip)
         text = lambda part: [list(b) for b in part if b[0] not in ("pg", "img")]
         out, starts = text(blocks[:front]), []
         for part in map(text, parts):
             if part:
                 starts.append(len(out))
                 out.extend(part)
-        return {"id": scan_id, "title": book["title"], "author": book["author"], "year": book["year"],
+        return {"id": scan_id, "title": book["title"], "author": book["author"], "year": book.get("year", ""),
                 "blocks": out, "starts": starts}
+
+    def live_book(self, book_id):
+        """(id, book, skip front matter) for a book opened from search: a scan, a HathiTrust book (its Archive copy)
+        or a Gutenberg book, read now if we haven't before."""
+        if HATHI_ID.match(book_id or ""):
+            book_id = self.hathi_twin(book_id)
+        g = self.gutenberg_id(book_id)
+        if g:
+            return g, self.book(g), g not in cut.KEEP_FRONT_MATTER
+        return book_id, self.scan(book_id), True
 
     def scan_pdf(self, scan_id, at=None):
         """The scan's PDF, for the editor's PDF mode: its size, then a piece of PDF_PIECE bytes from 'at'. The
@@ -475,7 +511,7 @@ class Drip:
         book_id = str(book_id or "").strip()
         if len(email) > 254 or not EMAIL.match(email):
             raise Problem(400, "That email address doesn't look right.")
-        if book_id not in self.library and not SCAN_LIVE.match(book_id):
+        if book_id not in self.library and not SCAN_LIVE.match(book_id) and book_id not in self.catalog:
             raise Problem(400, "We don't have that book.")
         try:
             pace = int(pace)

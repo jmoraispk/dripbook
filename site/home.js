@@ -244,7 +244,7 @@
     view.appendChild(head);
     view.appendChild(progress(q, f, [
       ['Your library', ids.length, 'to start now', 'lib'],
-      ['Project Gutenberg', cat ? more.length : 'searching', 'to request', 'gut'],
+      ['Project Gutenberg', cat ? more.length : 'searching', 'to open', 'gut'],
       ['Internet Archive', f ? (Array.isArray(f.ia) ? found.ia.length : f.ia) : 'idle', 'to open', 'ia'],
       ['HathiTrust', !HATHI ? 'off' : f ? (Array.isArray(f.hathi) ? found.hathi.length : f.hathi) : 'idle', 'to open', 'hathi']
     ], narrow));
@@ -255,11 +255,11 @@
     if ((more.length && show('gut')) || (found.ia.length && show('ia')) || (found.hathi.length && show('hathi'))) {
       var sec = el('section', { class: 'asks' });
       sec.appendChild(el('h2', null, 'More books'));
-      sec.appendChild(el('p', null, 'We haven’t made these into drips yet. Open a scan to start it now, ' +
-        'or request any book and we’ll email you when it’s ready.'));
+      sec.appendChild(el('p', null, 'We haven’t made these into drips yet. Open one and we get it ready in a few seconds, ' +
+        'so you can start it now.'));
       scans = found.ia.concat(found.hathi);
-      if (more.length && show('gut')) askList(sec, 'Project Gutenberg', null, more.map(function (b) {
-        return { title: b[1], by: b[2], attr: 'data-ask', id: b[0] };
+      if (more.length && show('gut')) askList(sec, 'Project Gutenberg', 'Clean text: open one and we cut it into parts in a second or two.', more.map(function (b) {
+        return { title: b[1], by: b[2], attr: 'data-ask', id: b[0], go: 'Open' };
       }));
       if (found.ia.length && show('ia')) askList(sec, 'Internet Archive', 'Scanned pages: open one and we clean up its text in a few seconds, then you can start it.', found.ia.map(scanItem), found.copies.ia, q);
       if (found.hathi.length && show('hathi')) askList(sec, 'HathiTrust', 'Scanned pages from university libraries: open one and we find the same scan on the Internet Archive, then clean up its text.', found.hathi.map(scanItem), found.copies.hathi, q);
@@ -670,9 +670,11 @@
   }
   // A Gutenberg book we haven't made a drip of: same window, with an email and a request.
   function openRequest(b) {
-    askWindow({ title: b[1], author: b[2], gutenberg: b[0] }, b[0],
+    var book = { title: b[1], author: b[2], gutenberg: b[0], source: 'gutenberg:' + b[0] };
+    askWindow(book, b[0],
       (b[3] ? b[3].replace(/^./, function (c) { return c.toUpperCase(); }) + '. ' : '') +
-      'We haven’t made this one into a drip yet. Request it and we’ll email you when it’s ready to start.');
+      'We haven’t made this one into a drip yet, so we get it ready now from Project Gutenberg.');
+    readScan(book);
   }
   // A scanned book: the same, with where the scan is.
   // It is read and cleaned up there and then, with a bar while it is, and can start at once. A HathiTrust book is
@@ -710,14 +712,15 @@
     scanBits(true);
     $('#join').hidden = true;
     $('#dlg-prep').className = 'prep';
-    var hathi = book.source.indexOf('hathi:') === 0;
-    at(4, hathi ? 'Finding the same scan on the Internet Archive…' : 'Finding the scan on the Internet Archive…');
+    var hathi = book.source.indexOf('hathi:') === 0, gut = !!book.gutenberg;
+    at(4, gut ? 'Getting the book from Project Gutenberg…' : hathi ? 'Finding the same scan on the Internet Archive…'
+      : 'Finding the scan on the Internet Archive…');
     scanCall(book.source, 'find').then(function (f) {
       if (!live()) return;
-      if (f.via) book.source = f.id;      // a HathiTrust book: we read and start its Archive copy
+      if (f.via || gut) book.source = f.id;   // a HathiTrust book's Archive copy, or a Gutenberg book's own id
       if (f.ready) return f;
-      var mb = f.size / 1e6, secs = 1.5 + f.size / 4e6, t0 = Date.now();
-      at(15, 'Reading ' + (mb >= 1 ? Math.round(mb) + ' MB' : 'the pages') + ' of scanned text…');
+      var mb = f.size / 1e6, secs = f.secs || 1.5 + f.size / 4e6, t0 = Date.now();
+      at(15, gut ? 'Reading the book…' : 'Reading ' + (mb >= 1 ? Math.round(mb) + ' MB' : 'the pages') + ' of scanned text…');
       prepTimer = setInterval(function () {
         var x = (Date.now() - t0) / 1000 / secs;
         at(15 + 77 * (1 - Math.exp(-2.2 * x)), x < 0.55 ? null : x < 1 ? 'Cleaning up the text…' : 'Cutting it into parts…');
@@ -726,7 +729,7 @@
     }).then(function (p) {
       clearInterval(prepTimer);
       if (!p || !live()) return;
-      at(100, 'Ready: ' + p.words.toLocaleString('en') + ' words, cleaned up from the scan.');
+      at(100, 'Ready: ' + p.words.toLocaleString('en') + (gut ? ' words.' : ' words, cleaned up from the scan.'));
       $('#dlg-prep').className = 'prep done';
       book.ready = p;
       if (p.title) $('#dlg-title').textContent = p.title;
@@ -738,22 +741,23 @@
       first.hidden = false;
       $('#join').hidden = false;
       $('#dlg-start').textContent = 'Start reading';
-      ownCuts(book.source, true);
+      ownCuts(book.source, true, !gut);
     }, function (err) {
       clearInterval(prepTimer);
       if (!live()) return;
       $('#dlg-prep').className = 'prep failed';
-      at(100, (err && err.message ? err.message + ' ' : 'We couldn’t read this scan just now. ') +
+      at(100, (err && err.message ? err.message + ' ' : 'We couldn’t read this ' + (gut ? 'book' : 'scan') + ' just now. ') +
         'You can still request it below.');
       $('#join').hidden = false;
-      ownCuts(book.source, false);
+      if (!gut) ownCuts(book.source, false, true);
     });
   }
-  // Cutting the book yourself in the editor (cuts.html): in the cleaned-up text, or on the scan's own PDF pages,
-  // which our server fetches in pieces. When the text didn't come out well, only the PDF.
+  // Cutting the book yourself in the editor (cuts.html): in the cleaned-up text, or on a scan's own PDF pages,
+  // which our server fetches in pieces. When a scan's text didn't come out well, only the PDF; a Gutenberg book has no PDF.
   var EDITOR = 'cuts.html';
-  function ownCuts(source, text) {
+  function ownCuts(source, text, pdf) {
     $('#cut-text').hidden = !text;
+    $('#cut-pdf').hidden = !pdf;
     $('#cut-text').href = EDITOR + '?' + new URLSearchParams({ scan: source, for: 'me' });
     $('#cut-pdf').href = EDITOR + '?' + new URLSearchParams({ scan: source, as: 'pdf', for: 'me' });
     $('#dlg-cut').hidden = false;
@@ -860,7 +864,8 @@
     fetch(ask ? '/api/request' : '/api/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ask ? { email: email, title: book.title, author: book.author, gutenberg: book.gutenberg, source: book.source }
+      body: JSON.stringify(ask ? { email: email, title: book.title, author: book.author, gutenberg: book.gutenberg,
+                                   source: book.gutenberg ? undefined : book.source }
                                : { email: email, book: book.ready ? book.source : book, pace: pace, tz: timeZone() })
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
