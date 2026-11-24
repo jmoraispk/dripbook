@@ -89,6 +89,13 @@
         <button type="submit" class="btn" id="dlg-start">Start reading</button>
       </form>
       <p class="note" id="note" role="status"></p>
+      <div class="own-cut" id="dlg-cut" hidden>
+        <button type="button" class="own-cut-open" aria-expanded="false" aria-controls="dlg-cut-ways">Choose your own cuts</button>
+        <div class="own-cut-ways" id="dlg-cut-ways" hidden>
+          <a id="cut-text" target="_blank" rel="noopener"><b>Edit the text</b><span>Move the cuts in the cleaned-up text. Quick to open.</span></a>
+          <a id="cut-pdf" target="_blank" rel="noopener"><b>Edit the PDF</b><span>Move the cuts on the scanned pages, pictures and all. A bigger download.</span></a>
+        </div>
+      </div>
     </div>
   </div>
   <div class="alike" id="alike"></div>

@@ -305,11 +305,14 @@ class LocalArchive:
     """The Archive for app.Drip, through the disk cache (fetch_ia)."""
     def ia_files(self, identifier):
         info, data = fetch_ia(identifier)
+        if "pdf_size" not in info:   # cached before we kept it
+            info.update({k: v for k, v in ia_files(identifier).items() if k in ("pdf", "pdf_size", "hosts")})
         return {**info, "xml_size": info.get("xml_size") or len(data)}
 
     def download_xml(self, identifier, info, timeout=60):
         return fetch_ia(identifier)[1]
 
+    download_range = staticmethod(scan.download_range)
     hathi_record = staticmethod(scan.hathi_record)
     ia_twins = staticmethod(scan.ia_twins)
 
@@ -359,10 +362,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_slice(url.path.removeprefix("/hathi-search/"))
             if url.path == "/api/scan":   # for the site on localhost (site/home.js SCAN_API)
                 try:
-                    out = (LOCAL_DRIP.scan_preview if q.get("step") == "read" else LOCAL_DRIP.scan_find)(q.get("id", ""))
+                    kind, out = LOCAL_DRIP.scan_api(q)
                 except app.Problem as e:
                     return self.send(e.status, {"error": e.message}, anyone=True)
-                return self.send(200, out, anyone=True)
+                return self.send(200, out if isinstance(out, bytes) else out.encode(), kind, anyone=True)
             if url.path == "/twin":
                 return self.send(200, {"twin": ia_twin(q.get("title", ""), q.get("author", ""))})
             if url.path == "/open":

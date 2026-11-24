@@ -693,7 +693,8 @@ class FakeArchive:
         self.xml = ocr or djvu()
         self.info = {"title": "The philosophy of the beautiful : being outlines / by William Knight.",
                      "author": "Knight, William Angus, 1836-1916", "year": "1891", "rights": "",
-                     "xml": "x_djvu.xml", "xml_size": len(self.xml), "hosts": [], **info}
+                     "xml": "x_djvu.xml", "xml_size": len(self.xml), "hosts": [],
+                     "pdf": "x.pdf", "pdf_size": len(self.pdf), **info}
         self.asked, self.downloads = 0, 0
 
     def ia_files(self, identifier):
@@ -707,6 +708,11 @@ class FakeArchive:
     hathi = {"htid": "mdp.39015", "title": "The philosophy of the beautiful", "author": "Knight, William, 1836-1916.",
              "year": "1891", "oclcs": ["123"], "rights": "pd", "volume": ""}
     twins = [{"id": "ia:philosophy00knig", "oclc": True, "year": "1891"}]
+
+    pdf = bytes(range(256)) * 40000          # about 10 MB
+
+    def download_range(self, identifier, info, start, end, timeout=30):
+        return self.pdf[start:end + 1]
 
     def hathi_record(self, htid):
         self.asked += 1
@@ -725,6 +731,37 @@ def make_scan(archive=None, redis=None):
 
 
 class ScanTest(unittest.TestCase):
+    def test_text_for_the_editor_matches_the_site_cut(self):
+        d, _ = make_scan()
+        out = d.scan_text("ia:philosophy00knig")
+        self.assertTrue(out["starts"] and out["starts"] == sorted(set(out["starts"])))
+        book = d.scan("ia:philosophy00knig")
+        parts = app.cut.cut_blocks(book["blocks"], app.EDITOR_PACE)
+        self.assertEqual(len(out["starts"]), len(parts))
+        self.assertEqual(out["blocks"][out["starts"][1]], list(parts[1][0]))
+        self.assertTrue(all(k not in ("pg", "img") for k, _ in out["blocks"]))
+        kind, body = d.scan_api({"id": "hathi:mdp.39015", "step": "text"})
+        self.assertEqual(json.loads(body)["blocks"], out["blocks"])
+
+    def test_pdf_comes_in_pieces(self):
+        d, _ = make_scan()
+        head = json.loads(d.scan_api({"id": "ia:philosophy00knig", "step": "pdf"})[1])
+        self.assertEqual(head["size"], len(d.ia.pdf))
+        got = b""
+        while len(got) < head["size"]:
+            kind, piece = d.scan_api({"id": "ia:philosophy00knig", "step": "pdf", "at": str(len(got))})
+            self.assertEqual(kind, "application/pdf")
+            self.assertLessEqual(len(piece), app.PDF_PIECE)
+            got += piece
+        self.assertEqual(got, d.ia.pdf)
+        for bad in ({"at": "-1"}, {"at": str(head["size"])}, {"at": "x"}, {"step": "nope"}):
+            with self.assertRaises(app.Problem):
+                d.scan_api({"id": "ia:philosophy00knig", "step": "pdf", **bad})
+        late = FakeArchive(year="1950")                  # rights still checked
+        d2, _ = make_scan(late)
+        with self.assertRaises(app.Problem):
+            d2.scan_api({"id": "ia:philosophy00knig", "step": "pdf", "at": "0"})
+
     def test_hathitrust_book_opens_from_its_archive_copy(self):
         d, _ = make_scan()
         found = d.scan_find("hathi:mdp.39015")

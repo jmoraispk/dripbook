@@ -142,6 +142,35 @@ label.btn,a.btn{display:inline-flex;align-items:center;cursor:pointer;text-decor
 .email figcaption{font-family:var(--sans);font-size:13px;color:var(--muted)}
 .email .tomorrow{font-family:var(--sans);border-top:1.5px solid var(--ink);padding-top:10px;margin-top:6px;font-size:15px}
 
+/* text mode: a scan's cleaned text instead of PDF pages */
+.text-book{flex:1;overflow:auto;padding:18px 24px 60px}
+.tseg{max-width:760px;margin:0 auto;padding:10px 16px 6px;border-top:2px solid var(--ink);cursor:pointer;font-family:var(--serif);font-size:14px;line-height:1.5;color:var(--muted)}
+.tseg:first-child{border-top:0}
+.tseg.a{background:var(--band-a)}
+.tseg.b{background:var(--band-b)}
+.tseg.skip{background:repeating-linear-gradient(135deg,rgba(74,82,112,.14) 0 6px,rgba(74,82,112,.04) 6px 12px)}
+.tseg.hot{outline:2px solid var(--ink);outline-offset:-2px}
+.tseg .chip{position:static;display:inline-block;transform:none;margin-bottom:6px;font-family:var(--sans)}
+.tseg p{margin:0 0 6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tseg h4{margin:4px 0;font-family:var(--sans);font-size:14px;color:var(--ink)}
+.tseg .more{font-family:var(--sans);font-size:12px;margin:0 0 4px}
+.text-lesson{width:100%;max-width:720px;background:#fff;box-shadow:0 1px 2px rgba(20,27,51,.18);border-radius:4px;padding:24px 32px;font-family:var(--serif);font-size:16.5px;line-height:1.6}
+.text-lesson .tb{margin:0}
+.text-lesson .tb.dim{opacity:.4}
+.text-lesson .tb.quote{border-left:3px solid var(--ribbon);padding-left:12px}
+.text-lesson .tb.note{font-size:14px;color:var(--muted)}
+.text-lesson .tb.verse{white-space:pre-line;padding-left:18px}
+.text-lesson h4.tb{font-family:var(--sans);font-size:18px;line-height:1.3;margin:6px 0}
+.text-lesson .more{font-family:var(--sans);font-size:13px;color:var(--muted);margin:0;text-align:center}
+.tcut{position:relative;margin:14px -32px;border-top:3px solid var(--ink)}
+.tcut span{position:absolute;right:12px;top:0;transform:translateY(-50%);background:var(--ink);color:var(--paper);font-family:var(--sans);font-size:12px;font-weight:700;border-radius:999px;padding:4px 10px;white-space:nowrap}
+.gap{position:relative;height:30px;margin:0 -32px;outline:none}
+.gap-btns{display:none;position:absolute;left:0;right:0;top:50%;border-top:2px dashed var(--blue);justify-content:flex-end;gap:6px;padding-right:12px;z-index:2}
+.gap:hover .gap-btns,.gap:focus-within .gap-btns,.gap:focus .gap-btns{display:flex}
+.gap-btns button{transform:translateY(-50%);border:0;background:var(--blue);color:#fff;font:700 12px var(--sans);border-radius:999px;padding:4px 11px;box-shadow:0 2px 6px rgba(20,27,51,.25)}
+.gap-btns button.soft{background:#fff;color:var(--blue);box-shadow:inset 0 0 0 1.5px var(--blue)}
+@media (max-width:900px){#lesson .pages{flex:0 0 58vh}.text-lesson{padding:18px}.tcut,.gap{margin-left:-18px;margin-right:-18px}}
+
 /* banners */
 .banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 20px;background:var(--ribbon-soft);border-bottom:1px solid var(--line);font-size:14px}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:12px;font-size:14px;max-width:min(680px,92vw);box-shadow:0 6px 24px rgba(20,27,51,.3);z-index:20}
@@ -434,6 +463,87 @@ async function open(data, pdfName, jsonText) {
   offerDraft();
 }
 
+// A scan from the Internet Archive or HathiTrust, opened from the site (?scan=ia:…): its text as our server
+// cleaned it ("text" mode, cut where the site would cut it), or its PDF fetched through our server in pieces
+// (&as=pdf), since the Archive doesn't let other sites' pages read its files.
+const SCAN_API = /^(localhost|127\.|10\.|192\.168\.)/.test(location.hostname) && location.port !== "8765"
+  ? `${location.protocol}//${location.hostname}:8765/api/scan` : "/api/scan";
+async function scanCall(query, kind = "json") {
+  const r = await fetch(`${SCAN_API}?${new URLSearchParams(query)}`);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "We couldn't reach Dripbook. Try again in a minute.");
+  return kind === "json" ? r.json() : new Uint8Array(await r.arrayBuffer());
+}
+async function openScan(id, asPdf) {
+  if (!asPdf) {
+    status("Cleaning up the scan’s text…");
+    return openText(await scanCall({id, step: "text"}));
+  }
+  status("Finding the scan’s PDF…");
+  const head = await scanCall({id, step: "pdf"});
+  const data = new Uint8Array(head.size);
+  const at = [];
+  for (let i = 0; i < head.size; i += head.piece) at.push(i);
+  let done = 0;
+  const show = () => status(`Downloading the PDF: ${Math.round(done / 1e6)} of ${Math.round(head.size / 1e6) || 1} MB…<br><progress max="${head.size}" value="${done}"></progress>`);
+  show();
+  const next = async () => {
+    while (at.length) {
+      const i = at.shift();
+      let piece = null;
+      for (let tries = 0; !piece; tries++) {
+        try { piece = await scanCall({id: head.id, step: "pdf", at: i}, "bytes"); }
+        catch (e) { if (tries >= 2) throw e; }
+      }
+      data.set(piece, i);
+      done += piece.length;
+      show();
+    }
+  };
+  await Promise.all([next(), next(), next()]);
+  await open(data, head.name, null);
+  S.plan.book = {title: head.title || S.plan.book.title, author: head.author || S.plan.book.author};
+  $("#mail-rights").nextElementSibling.textContent = "I'll read this public-domain scan myself; I won't pass the lessons on as my own.";
+  refreshBar();
+}
+
+function plainOf(html) {
+  return new DOMParser().parseFromString(`<body>${html}</body>`, "text/html").body.textContent || "";
+}
+async function openText(book) {
+  S.pdf = null;
+  S.data = null;
+  S.mode = "text";
+  S.pdfName = book.title;
+  S.scanId = book.id;
+  S.sizes = new Map();
+  S.undo = [];
+  S.redo = [];
+  S.k = 0;
+  S.blocks = book.blocks.map(([kind, html]) => {
+    const text = plainOf(html).trim();
+    const words = (text.match(/\S+/g) || []).length;
+    return kind[0] === "h"
+      ? {type: "heading", level: kind.length === 2 ? Number(kind[1]) || 2 : 2, kind, html, text, words, page: 0}
+      : {type: "paragraph", kind, html, text, words, quote: kind === "quote", page: 0};
+  });
+  if (!S.blocks.length) throw new Error("This scan has no text to cut.");
+  S.segs = C.defaultSegments(S.blocks, book.starts.length ? book.starts : [0]);
+  S.plan = {book: {title: book.title, author: book.author}, source: {scan: book.id}, settings: {free_lessons: 3}};
+  S.pages = [];
+  S.sync = true;
+  S.saved = true;
+  S.key = "dripbook-cuts:text:" + book.id;
+  status("");
+  $("#start").hidden = true;
+  for (const id of ["#tabs", "#undo", "#redo", "#split-long", "#mail-me"]) $(id).hidden = false;
+  $("#mail-rights").nextElementSibling.textContent = "I'll read this public-domain scan myself; I won't pass the lessons on as my own.";
+  shownPages = "";
+  buildOverview();
+  setView("overview");
+  toast(`We cut the book where Dripbook would: ${C.stats(S.blocks, S.segs).lessons} lessons. Click one to move its cuts.`, 7000);
+  offerDraft();
+}
+
 // ------------------------------------------------------------------ editing
 
 function apply(next, message) {
@@ -507,6 +617,7 @@ function offerDraft() {
 const saveName = () => (S.mode === "plan" ? "lessons.json" : "cuts.json");
 
 function save() {
+  if (S.mode === "text") return toast("Your cuts are kept in this browser as you go.");
   const out = S.mode === "plan" ? C.toPlan(S.plan, S.blocks, S.segs) : C.toCuts(S.plan, S.blocks, S.segs);
   const blob = new Blob([JSON.stringify(out, null, 2) + "\n"], {type: "application/json"});
   const a = document.createElement("a");
@@ -573,10 +684,10 @@ function renderList(el) {
   const free = S.plan.settings.free_lessons || 3;
   el.innerHTML = S.segs.map((s, k) => {
     const [p1, p2] = pagesOf(s);
-    const pages = p1 === p2 ? `p. ${p1}` : `pp. ${p1}–${p2}`;
+    const pages = S.mode === "text" ? `${C.words(S.blocks, s).toLocaleString()} words` : p1 === p2 ? `p. ${p1}` : `pp. ${p1}–${p2}`;
     if (s.kind === "skip") {
       return `<div class="row skip${k === S.k ? " active" : ""}" data-k="${k}"><span class="day">Skip</span>
-        <span class="row-main"><span class="subj">${esc(s.reason || "Skipped")}</span><span class="meta">${pages} · ${C.words(S.blocks, s).toLocaleString()} words</span></span></div>`;
+        <span class="row-main"><span class="subj">${esc(s.reason || "Skipped")}</span><span class="meta">${S.mode === "text" ? pages : `${pages} · ${C.words(S.blocks, s).toLocaleString()} words`}</span></span></div>`;
     }
     const w = C.warnings(S.blocks, s);
     return `<div class="row${k === S.k ? " active" : ""}" data-k="${k}"><span class="day">Day ${days[k]}</span>
@@ -593,6 +704,16 @@ function renderList(el) {
 let observer = null;
 function buildOverview() {
   const grid = $("#grid");
+  grid.classList.toggle("text-book", S.mode === "text");
+  grid.classList.toggle("grid", S.mode !== "text");
+  if (S.mode === "text") {
+    observer?.disconnect();
+    grid.onclick = (e) => {
+      const target = e.target.closest("[data-k]");
+      if (target) setView("lesson", Number(target.dataset.k));
+    };
+    return;
+  }
   grid.innerHTML = S.pages.map((p) => {
     const {w, h} = S.sizes.get(p);
     return `<div class="card"><div class="sheet" data-page="${p}" style="aspect-ratio:${w}/${h}"><canvas></canvas><div class="ov"></div></div><span class="pno">${p}</span></div>`;
@@ -636,7 +757,25 @@ function overlayHTML(page, opts = {}) {
   return html;
 }
 
+// Text mode: each lesson as a band of its first lines, with its day on top.
+function paintTextOverview() {
+  const days = C.days(S.segs);
+  $("#grid").innerHTML = S.segs.map((s, k) => {
+    const skip = s.kind === "skip";
+    let lines = "";
+    for (let i = s.a; i <= Math.min(s.b, s.a + 2); i++) {
+      const b = S.blocks[i];
+      lines += b.type === "heading" ? `<h4>${esc(b.text)}</h4>` : `<p>${esc(b.text)}</p>`;
+    }
+    const rest = s.b - s.a - 2;
+    return `<div class="tseg ${skip ? "skip" : days[k] % 2 ? "a" : "b"}${k === S.k ? " hot" : ""}" data-k="${k}">
+      <span class="chip${skip ? " skip" : ""}">${skip ? `Skip · ${esc(s.reason)}` : `Day ${days[k]} · ${esc(s.subject)}`}</span>${lines}
+      ${rest > 0 ? `<p class="more">${C.minutes(S.blocks, s)} min · ${rest} more paragraph${rest === 1 ? "" : "s"}</p>` : ""}</div>`;
+  }).join("");
+}
+
 function paintOverview() {
+  if (S.mode === "text") return paintTextOverview();
   document.querySelectorAll("#grid .sheet").forEach((sheet) => {
     sheet.querySelector(".ov").innerHTML = overlayHTML(Number(sheet.dataset.page));
   });
@@ -644,7 +783,56 @@ function paintOverview() {
 
 // One lesson: its pages large, its two cuts draggable, the email beside it.
 let shownPages = "";
+// Text mode: the lesson's paragraphs, with a few of the lessons either side. Between two paragraphs a reader
+// can cut, or move this lesson's start or end there.
+const CONTEXT = 4;
+function textBlockHTML(i, dim) {
+  const b = S.blocks[i], cls = `tb ${esc(b.kind)}${dim ? " dim" : ""}`;
+  return b.type === "heading" ? `<h4 class="${cls}">${esc(b.text)}</h4>` : `<p class="${cls}">${b.html}</p>`;
+}
+function gapHTML(j, buttons) {
+  return `<div class="gap" tabindex="0" data-j="${j}"><div class="gap-btns">${buttons.map(([act, label, soft]) =>
+    `<button type="button" data-cut="${act}"${soft ? ' class="soft"' : ""}>${label}</button>`).join("")}</div></div>`;
+}
+function renderTextLesson(scroll) {
+  const seg = S.segs[S.k], days = C.days(S.segs);
+  const name = seg.kind === "skip" ? "this part" : `Day ${days[S.k]}`;
+  const from = Math.max(0, seg.a - CONTEXT), to = Math.min(S.blocks.length - 1, seg.b + CONTEXT);
+  let html = from > 0 ? `<p class="more">…</p>` : "";
+  for (let i = from; i <= to; i++) {
+    if (i === seg.a && S.k > 0) html += `<div class="tcut"><span>Start of ${name}</span></div>`;
+    else if (i === seg.b + 1) html += `<div class="tcut"><span>End of ${name}</span></div>`;
+    else if (i > from) {
+      if (i < seg.a) html += gapHTML(i, [["start", "Start here"]]);
+      else if (i <= seg.b) html += gapHTML(i, [["split", "Cut here"], ["start", "Start here", true], ["end", "End here", true]]);
+      else html += gapHTML(i, [["end", "End here"]]);
+    }
+    html += textBlockHTML(i, i < seg.a || i > seg.b);
+  }
+  if (to < S.blocks.length - 1) html += `<p class="more">…</p>`;
+  const pagesEl = $("#pages");
+  pagesEl.innerHTML = `<div class="text-lesson">${html}</div>`;
+  renderPanel();
+  if (scroll) {
+    const start = pagesEl.querySelector(".tcut");
+    pagesEl.scrollTop = start && S.k > 0 ? start.getBoundingClientRect().top - pagesEl.getBoundingClientRect().top - 120 : 0;
+  }
+}
+$("#pages").addEventListener("click", (e) => {
+  const act = e.target.closest("[data-cut]")?.dataset.cut;
+  if (!act || S.mode !== "text") return;
+  const j = Number(e.target.closest(".gap").dataset.j);
+  if (act === "split") {
+    if (apply(C.split(S.segs, S.k, j, S.blocks))) refresh(true);
+  } else if (act === "start") {
+    apply(C.moveCut(S.segs, S.k, j, S.blocks), "That would leave the lesson before this one empty.");
+  } else {
+    apply(C.moveCut(S.segs, S.k + 1, j, S.blocks), "That would leave the next lesson empty.");
+  }
+});
+
 function renderLesson(scroll) {
+  if (S.mode === "text") return renderTextLesson(scroll);
   const seg = S.segs[S.k];
   const [p1, p2] = pagesOf(seg);
   // one page either side, and as far as the next cut when blank pages come before it
@@ -826,7 +1014,7 @@ function renderPanel() {
     <div class="field"><label for="f-lead">Intro line <span>optional</span></label><input type="text" id="f-lead" data-field="lead_in" maxlength="220" value="${esc(seg.lead_in)}"></div>
     <div class="field"><label for="f-teaser">Tomorrow line <span class="sync"><input type="checkbox" id="f-sync" ${S.sync ? "checked" : ""}> same as next subject</span></label>
       <input type="text" id="f-teaser" data-field="teaser" maxlength="220" value="${esc(seg.teaser)}" ${S.sync ? "disabled" : ""}></div>`}
-    <p class="facts">${C.words(S.blocks, seg).toLocaleString()} words${skip ? "" : `, about ${C.minutes(S.blocks, seg)} minutes`} · ${p2 !== p1 ? `pages ${p1}–${p2}` : `page ${p1}`}${S.mode === "plan" ? ` · blocks ${esc(S.blocks[seg.a].id)} to ${esc(S.blocks[seg.b].id)}` : ""}</p>
+    <p class="facts">${C.words(S.blocks, seg).toLocaleString()} words${skip ? "" : `, about ${C.minutes(S.blocks, seg)} minutes`}${S.mode === "text" ? "" : ` · ${p2 !== p1 ? `pages ${p1}–${p2}` : `page ${p1}`}`}${S.mode === "plan" ? ` · blocks ${esc(S.blocks[seg.a].id)} to ${esc(S.blocks[seg.b].id)}` : ""}</p>
     ${w.length ? `<p class="warn">${w.map(esc).join("<br>")}</p>` : ""}
     <div class="actions">
       <button type="button" class="btn btn-small" data-act="merge-prev" ${S.k === 0 ? "disabled" : ""}>Merge with previous</button>
@@ -834,7 +1022,7 @@ function renderPanel() {
       ${skip ? `<button type="button" class="btn btn-small" data-act="lesson">Make it a lesson</button>` : `<button type="button" class="btn btn-small" data-act="skip">Skip these pages</button>
       <button type="button" class="btn btn-small" data-act="sections" title="Cut this lesson at its section headings into parts of about 4 minutes">Split at sections</button>`}
     </div>
-    <p class="help">Drag a black line to move that cut; it snaps to the gaps between paragraphs. To cut this ${skip ? "part" : "lesson"} in two, point at the page and click <strong>Cut here</strong> on the blue line.</p>
+    <p class="help">${S.mode === "text" ? `Point between two paragraphs to cut there, or to move where this ${skip ? "part" : "lesson"} starts or ends.` : `Drag a black line to move that cut; it snaps to the gaps between paragraphs. To cut this ${skip ? "part" : "lesson"} in two, point at the page and click <strong>Cut here</strong> on the blue line.`}</p>
     <div class="reader"><h3 class="rt">${skip ? "Text in this part" : "What readers get"}</h3>
       ${S.mode === "pdf" ? `<p class="note">A quick preview without images. The finished lessons are made from the PDF itself.</p>` : ""}
       <div class="email" id="email"></div></div>`;
@@ -916,7 +1104,8 @@ function renderEmail(el, seg, skip) {
   const figures = [];
   for (let i = seg.a; i <= seg.b; i++) {
     const b = S.blocks[i];
-    if (b.type === "heading") html += `<h4>${esc(b.text).replace(/\n/g, "<br>")}</h4>`;
+    if (S.mode === "text" && b.type !== "heading") html += `<p class="${b.kind === "quote" ? "quote" : b.kind === "note" ? "fn" : ""}">${b.html}</p>`;
+    else if (b.type === "heading") html += `<h4>${esc(b.text).replace(/\n/g, "<br>")}</h4>`;
     else if (b.type === "code") html += `<pre>${esc(b.text)}</pre>`;
     else if (b.type === "list_item") html += `<div class="li" style="margin-left:${((b.level || 1) - 1) * 18}px"><span class="m">${esc(b.marker)}</span><span>${runsHTML(b)}</span></div>`;
     else if (b.type === "figure") { html += `<figure data-i="${i}"><canvas></canvas>${b.caption ? `<figcaption>${esc(b.caption)}</figcaption>` : ""}</figure>`; figures.push(i); }
@@ -955,7 +1144,12 @@ function inlineHTML(b) {
     return h;
   }).join("");
 }
+const TEXT_KINDS = {h: "h2", h1: "h2", h2: "h2", h3: "h3", h4: "h3"};
 function emailLessons(figures = []) {
+  if (S.mode === "text") {
+    return S.segs.filter((s) => s.kind === "lesson").map((seg) =>
+      S.blocks.slice(seg.a, seg.b + 1).map((b) => [TEXT_KINDS[b.kind] || b.kind, b.type === "heading" ? esc(b.text) : b.html]));
+  }
   let page = null;
   return S.segs.filter((s) => s.kind === "lesson").map((seg, k) => {
     const out = [];
@@ -1136,7 +1330,7 @@ document.addEventListener("keydown", (e) => {
   else if (!typing && e.key === "Escape") setView("overview");
 });
 window.addEventListener("beforeunload", (e) => {
-  if (S.plan && !S.saved) { e.preventDefault(); e.returnValue = ""; }
+  if (S.plan && !S.saved && S.mode !== "text") { e.preventDefault(); e.returnValue = ""; }
 });
 
 $("#in-pdf").addEventListener("change", (e) => pick(...e.target.files));
@@ -1151,6 +1345,7 @@ drop.addEventListener("drop", (e) => {
 
 // ?pdf=…[&plan=…] loads files by URL when this page is served over http (also used for testing).
 const params = new URLSearchParams(location.search);
+if (params.get("scan")) openScan(params.get("scan"), params.get("as") === "pdf").catch(startError);
 if (params.get("pdf")) {
   (async () => {
     try {

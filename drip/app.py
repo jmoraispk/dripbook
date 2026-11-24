@@ -70,6 +70,9 @@ HATHI_ID = re.compile(r"^hathi:[A-Za-z0-9._$:/+-]{1,120}$")
 TWINS_TRIED = 4
 MAX_SCAN_XML = 40_000_000         # the OCR file, uncompressed: ~450,000 words; 17 MB (200,000) reads in ~5 s
 BAD_SCAN_SECONDS = 7 * 24 * 3600
+MAX_SCAN_PDF = 150_000_000
+PDF_PIECE = 4_000_000             # under Vercel's 4.5 MB reply limit
+EDITOR_PACE = 5                   # the editor starts from these cuts: its lessons aim at 3 to 5 minutes
 TIME_ZONE = re.compile(r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$")   # an IANA name like Europe/Lisbon
 # Book requests: a Redis list with one entry per request. Only an identical request from the
 # same address within 10 minutes (a double click) is dropped.
@@ -400,6 +403,60 @@ class Drip:
                 "words": sum(cut.words(t) for _, t in book["blocks"]),
                 "parts": {str(p): len(v) for p, v in parts.items()},
                 "first": {"heading": cut.plain(cut.part_heading(first) or ""), "html": cut.to_html(first)}}
+
+    def scan_text(self, scan_id):
+        """A scan's cleaned text for the editor's text mode: its blocks [kind, html] and the block each part starts at,
+        as the site would cut it. 'front' blocks come before the first part (title page, preface), which the
+        site leaves out."""
+        if HATHI_ID.match(scan_id or ""):
+            scan_id = self.hathi_twin(scan_id)
+        book = self.scan(scan_id)
+        blocks = book["blocks"]
+        front = cut.front_end(blocks)
+        parts = cut.cut_blocks(blocks, EDITOR_PACE)
+        text = lambda part: [list(b) for b in part if b[0] not in ("pg", "img")]
+        out, starts = text(blocks[:front]), []
+        for part in map(text, parts):
+            if part:
+                starts.append(len(out))
+                out.extend(part)
+        return {"id": scan_id, "title": book["title"], "author": book["author"], "year": book["year"],
+                "blocks": out, "starts": starts}
+
+    def scan_pdf(self, scan_id, at=None):
+        """The scan's PDF, for the editor's PDF mode: its size, then a piece of PDF_PIECE bytes from 'at'. The
+        browser can't fetch it from the Archive itself (no CORS), and Vercel replies are capped at 4.5 MB."""
+        if HATHI_ID.match(scan_id or ""):
+            scan_id = self.hathi_twin(scan_id)
+        info = self.scan_files(scan_id)
+        size = info.get("pdf_size", 0)
+        if not info.get("pdf") or not size:
+            raise Problem(422, "This scan has no PDF on the Internet Archive. Edit its text instead.")
+        if size > MAX_SCAN_PDF:
+            raise Problem(422, "This scan's PDF is too big to open here. Edit its text instead.")
+        if at is None:
+            return {"id": scan_id, "size": size, "piece": PDF_PIECE, "name": info["pdf"],
+                    "title": scan.short_title(info["title"]), "author": scan.short_author(info["author"])}
+        if not 0 <= at < size:
+            raise Problem(400, "That's past the end of the PDF.")
+        try:
+            return self.ia.download_range(scan_id[3:], info, at, min(size, at + PDF_PIECE) - 1)
+        except (OSError, ValueError) as e:
+            raise Problem(502, "The Internet Archive didn't send the PDF. Try again in a minute.") from e
+
+    def scan_api(self, query):
+        """GET /api/scan, here and in the sources tool: (content type, body) for ?id=&step=find|read|text|pdf[&at=]."""
+        scan_id, step = query.get("id", ""), query.get("step", "find")
+        if step == "pdf" and query.get("at") is not None:
+            try:
+                at = int(query["at"])
+            except ValueError:
+                raise Problem(400, "That's not a place in the PDF.") from None
+            return "application/pdf", self.scan_pdf(scan_id, at)
+        fn = {"find": self.scan_find, "read": self.scan_preview, "text": self.scan_text, "pdf": self.scan_pdf}.get(step)
+        if not fn:
+            raise Problem(400, "Ask for find, read, text or pdf.")
+        return "application/json", json.dumps(fn(scan_id))
 
     def parts(self, sub):
         book = self.book(sub["book"])

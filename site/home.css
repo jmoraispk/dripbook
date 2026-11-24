@@ -173,7 +173,15 @@ dialog::backdrop{background:rgba(4,7,14,.74);backdrop-filter:blur(3px)}
 .pace button{height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--rule);background:none;color:var(--muted);font-size:.875rem;cursor:pointer}
 .pace button[aria-pressed="true"]{background:var(--text);color:var(--night);border-color:var(--text)}
 .join{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
-.join[hidden],.prep[hidden],.first[hidden]{display:none}
+.join[hidden],.prep[hidden],.first[hidden],.own-cut[hidden],.own-cut-ways[hidden],.own-cut a[hidden]{display:none}
+.own-cut{margin-top:10px}
+.own-cut-open{font:inherit;font-size:.92rem;color:var(--muted);background:none;border:0;padding:4px 0;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.own-cut-open:hover,.own-cut-open[aria-expanded=true]{color:var(--text)}
+.own-cut-ways{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px}
+.own-cut-ways a{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid var(--rule);border-radius:10px;color:inherit;text-decoration:none}
+.own-cut-ways a:hover,.own-cut-ways a:focus-visible{border-color:var(--drop)}
+.own-cut-ways b{font-weight:600}
+.own-cut-ways span{font-size:.86rem;color:var(--muted);line-height:1.4}
 .prep{margin-top:16px}
 .prep-bar{height:6px;border-radius:3px;background:var(--rule);overflow:hidden}
 .prep-bar span{display:block;height:100%;width:0;background:var(--drop);transition:width .25s linear}

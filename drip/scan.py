@@ -58,6 +58,7 @@ def ia_files(identifier):
             "xml": xml, "xml_size": int(files[xml].get("size") or 0) if xml else 0,
             "txt": next((n for n in names if n.endswith("_djvu.txt")), None),
             "pdf": next((n for n in sorted(names) if n.endswith(".pdf") and "_text" not in n), None),
+            "pdf_size": next((int(files[n].get("size") or 0) for n in sorted(names) if n.endswith(".pdf") and "_text" not in n), 0),
             # the item's own storage servers: archive.org/download redirects to a mirror that is sometimes down
             "hosts": [f"https://{h}{meta['dir']}/{{name}}" for h in meta.get("workable_servers", []) if meta.get("dir")]}
 
@@ -70,6 +71,22 @@ def download_xml(identifier, info, timeout=60):
     for url in info["hosts"] + [IA_FILE.format(id=identifier, name="{name}")]:
         try:
             return get(url.format(name=urllib.parse.quote(info["xml"])), raw=True, timeout=timeout)
+        except OSError as e:
+            err = e
+    raise err
+
+
+def download_range(identifier, info, start, end, timeout=30):
+    """Bytes start to end (inclusive) of the scan's PDF, from the item's own servers first."""
+    err = None
+    for url in info["hosts"] + [IA_FILE.format(id=identifier, name="{name}")]:
+        req = urllib.request.Request(url.format(name=urllib.parse.quote(info["pdf"])),
+                                     headers={"User-Agent": UA, "Range": f"bytes={start}-{end}"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                if r.status != 206:
+                    raise OSError(f"The Archive sent the whole file ({r.status}), not a piece of it.")
+                return r.read(end - start + 1)
         except OSError as e:
             err = e
     raise err

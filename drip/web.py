@@ -111,11 +111,9 @@ def request_book(req):
 
 def scan_get(req):
     """GET /api/scan?id=ia:<identifier>&step=find, then &step=read: the site opens a scan in two steps, so it
-    can show how far along it is."""
-    d = drip(mail=False)
-    scan_id = req.query.get("id", "")
-    out = d.scan_preview(scan_id) if req.query.get("step") == "read" else d.scan_find(scan_id)
-    return 200, JSON, json.dumps(out)
+    can show how far along it is. step=text and step=pdf[&at=] feed the editor (Drip.scan_api)."""
+    ctype, body = drip(mail=False).scan_api(req.query)
+    return 200, ctype, body
 
 
 def subscribe_own(req):
@@ -202,7 +200,7 @@ def handler_for(get=None, post=None, kind=HTML, limit=10_000):
                 else:
                     body = self.rfile.read(length) if length else b""
                     status, ctype, body = fn(Request(method, self.path, dict(self.headers), body))
-            data = body.encode("utf-8")
+            data = body if isinstance(body, bytes) else body.encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))

@@ -688,6 +688,9 @@
   }
   function scanBits(on) {
     $('#dlg-prep').hidden = !on;
+    $('#dlg-cut').hidden = true;
+    $('#dlg-cut-ways').hidden = true;
+    $('#dlg-cut .own-cut-open').setAttribute('aria-expanded', 'false');
     $('#dlg-first').hidden = true;
     $('#dlg-first').open = false;
     $('#join').hidden = false;
@@ -735,6 +738,7 @@
       first.hidden = false;
       $('#join').hidden = false;
       $('#dlg-start').textContent = 'Start reading';
+      ownCuts(book.source, true);
     }, function (err) {
       clearInterval(prepTimer);
       if (!live()) return;
@@ -742,8 +746,23 @@
       at(100, (err && err.message ? err.message + ' ' : 'We couldn’t read this scan just now. ') +
         'You can still request it below.');
       $('#join').hidden = false;
+      ownCuts(book.source, false);
     });
   }
+  // Cutting the book yourself in the editor (cuts.html): in the cleaned-up text, or on the scan's own PDF pages,
+  // which our server fetches in pieces. When the text didn't come out well, only the PDF.
+  var EDITOR = 'cuts.html';
+  function ownCuts(source, text) {
+    $('#cut-text').hidden = !text;
+    $('#cut-text').href = EDITOR + '?' + new URLSearchParams({ scan: source, for: 'me' });
+    $('#cut-pdf').href = EDITOR + '?' + new URLSearchParams({ scan: source, as: 'pdf', for: 'me' });
+    $('#dlg-cut').hidden = false;
+  }
+  $('#dlg-cut .own-cut-open').addEventListener('click', function () {
+    var ways = $('#dlg-cut-ways');
+    ways.hidden = !ways.hidden;
+    this.setAttribute('aria-expanded', String(!ways.hidden));
+  });
   function scanCall(id, step) {
     var stop = new AbortController(), t = setTimeout(function () { stop.abort(); }, 70000);
     return fetch(SCAN_API + '?' + new URLSearchParams({ id: id, step: step }), { signal: stop.signal }).then(function (r) {

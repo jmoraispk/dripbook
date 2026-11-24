@@ -256,13 +256,16 @@ def cut(text, pace, skip_front=True):
     return cut_blocks(paragraphs(text), pace, skip_front)
 
 
+def front_end(found):
+    """Where the book proper starts: the first chapter, else the end of the title page."""
+    return story_start(found) or title_page_end(found)
+
+
 def cut_blocks(found, pace, skip_front=True):
     """Split a book's blocks into parts, each a list of (kind, html) blocks, from chapter one on."""
     target = WORDS_PER_MINUTE * pace
     blocks = []
-    start = story_start(found) if skip_front else 0
-    if skip_front and not start:
-        start = title_page_end(found)
+    start = front_end(found) if skip_front else 0
     for b in found[start:]:
         blocks.extend(split_long(b, target) if words(b[1]) > 1.5 * target else [b])
 
