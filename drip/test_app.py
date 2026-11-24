@@ -184,14 +184,14 @@ class SubscribeTest(unittest.TestCase):
     def test_rejects_bad_input(self):
         d, _, _ = make()
         for email, book, pace in [("nope", "7", 5), ("a@b.co", "999", 5), ("a@b.co", "7", 7), ("a@b.co", "7", None)]:
-            with self.assertRaises(Problem) as e:
+            with self.assertRaises(app.Problem) as e:
                 d.subscribe(email, book, pace, "https://x")
             self.assertEqual(e.exception.status, 400)
         self.assertEqual(d.mail.sent, [])
 
     def test_stub_books_are_refused(self):
         d, _, _ = make()
-        with self.assertRaises(Problem) as e:
+        with self.assertRaises(app.Problem) as e:
             d.subscribe("a@b.co", "8", 5, "https://x")
         self.assertEqual(e.exception.status, 422)
 
@@ -199,7 +199,7 @@ class SubscribeTest(unittest.TestCase):
         d, _, _ = make({"ALLOWED_EMAILS": "me@x.com, @team.com"})
         d.subscribe("me@x.com", "7", 5, "https://x")
         d.subscribe("anyone@team.com", "7", 5, "https://x")
-        with self.assertRaises(Problem) as e:
+        with self.assertRaises(app.Problem) as e:
             d.subscribe("stranger@y.com", "7", 5, "https://x")
         self.assertEqual(e.exception.status, 403)
 
@@ -226,7 +226,7 @@ class SubscribeTest(unittest.TestCase):
     def test_resend_is_rate_limited_and_keeps_the_token(self):
         d, clock, _ = make()
         d.subscribe("a@b.co", "7", 5, "https://x")
-        with self.assertRaises(Problem) as e:
+        with self.assertRaises(app.Problem) as e:
             d.subscribe("a@b.co", "7", 5, "https://x")
         self.assertEqual(e.exception.status, 429)
         clock.now += 61
@@ -238,7 +238,7 @@ class SubscribeTest(unittest.TestCase):
     def test_postmark_failure_is_reported(self):
         d, _, _ = make()
         d.mail.reply = {"ErrorCode": 300, "Message": "Invalid email"}
-        with self.assertRaises(Problem) as e:
+        with self.assertRaises(app.Problem) as e:
             d.subscribe("a@b.co", "7", 5, "https://x")
         self.assertEqual(e.exception.status, 502)
 
@@ -272,7 +272,7 @@ class RequestTest(unittest.TestCase):
     def test_rejects_bad_input(self):
         d, _, _ = make()
         for title, email in (("", "a@b.co"), ("x" * 201, "a@b.co"), ("Dune", "nope")):
-            with self.assertRaises(Problem):
+            with self.assertRaises(app.Problem):
                 d.request_book(title, "", email)
 
     def test_a_gutenberg_book_from_search_keeps_its_number(self):
@@ -282,7 +282,7 @@ class RequestTest(unittest.TestCase):
         d.request_book("Emma", "", "a@b.co")
         self.assertEqual([r.get("gutenberg") for r in self.saved(d)], [12345, None])
         for bad in ("12a", "-1", "12345678"):
-            with self.assertRaises(Problem):
+            with self.assertRaises(app.Problem):
                 d.request_book("Dune", "", "a@b.co", gutenberg=bad)
 
     def test_a_scan_from_search_keeps_its_id(self):
@@ -292,14 +292,14 @@ class RequestTest(unittest.TestCase):
         d.request_book("Persuasion", "", "a@b.co", source="hathi:uc1.$b123456")
         self.assertEqual([r.get("source") for r in self.saved(d)], ["ia:missmarjoribanks00olip", "hathi:uc1.$b123456"])
         for bad in ("gutenberg:12", "ia:", "ia:a b", "ia:<x>", "ia:" + "x" * 121):
-            with self.assertRaises(Problem):
+            with self.assertRaises(app.Problem):
                 d.request_book("Dune", "", "a@b.co", source=bad)
 
     def test_stops_taking_requests_when_full(self):
         d, _, _ = make()
         d.request_book("Dune", "", "a@b.co")
         with mock.patch.object(app, "MAX_REQUESTS", 1):
-            with self.assertRaises(Problem) as e:
+            with self.assertRaises(app.Problem) as e:
                 d.request_book("Emma", "", "a@b.co")
         self.assertEqual(e.exception.status, 503)
 
@@ -355,19 +355,19 @@ class OwnTest(unittest.TestCase):
                 self.start(d, **kw)
             self.assertEqual(e.exception.status, status, kw)
         self.start(d)
-        with self.assertRaises(Problem) as e:
+        with self.assertRaises(app.Problem) as e:
             self.start(d)
         self.assertEqual(e.exception.status, 429)
 
     def test_allowlist_and_ceiling(self):
         d, _, _ = make(env={"ALLOWED_EMAILS": "@team.com"})
-        with self.assertRaises(Problem) as e:
+        with self.assertRaises(app.Problem) as e:
             self.start(d)
         self.assertEqual(e.exception.status, 403)
         d, _, _ = make()
         with mock.patch.object(app, "MAX_OWN_BOOKS", 1):
             self.start(d)
-            with self.assertRaises(Problem) as e:
+            with self.assertRaises(app.Problem) as e:
                 self.start(d, email="b@x.com")
         self.assertEqual(e.exception.status, 503)
 
@@ -401,7 +401,7 @@ class OwnTest(unittest.TestCase):
 
         out = d.pictures_done(book, key)
         self.assertEqual(out["status"], "sent")
-        with self.assertRaises(Problem):
+        with self.assertRaises(app.Problem):
             d.pictures_done(book, key)   # the key is used up
         d.confirm(token_from(d.mail.sent[0], "confirm"))
         self.assertEqual(set(d.blob.ttl.values()), {3 + 60}, "kept for the drip, with room to spare")
@@ -440,11 +440,11 @@ class OwnTest(unittest.TestCase):
         out = self.start(d, lessons=self.picture_lessons())
         big = {"i0": {"type": "image/jpeg", "data": base64.b64encode(b"x" * 4_000_000).decode()}}
         with mock.patch.object(app, "MAX_PART_PICTURE_BYTES", 3_000_000):
-            with self.assertRaises(Problem) as e:
+            with self.assertRaises(app.Problem) as e:
                 d.add_pictures(out["book"], out["key"], 1, big)
         self.assertEqual(e.exception.status, 413)
         d.blob.fail = True
-        with self.assertRaises(Problem) as e:
+        with self.assertRaises(app.Problem) as e:
             d.add_pictures(out["book"], out["key"], 3, {"i2": {"type": "image/png", "data": "AAAA"}})
         self.assertEqual(e.exception.status, 502)
         self.assertEqual(d.pictures_done(out["book"], out["key"])["status"], "sent", "the drip goes without them")
@@ -530,7 +530,7 @@ class DripTest(unittest.TestCase):
         self.assertEqual(len(d.mail.sent), count)
 
     def test_unknown_token(self):
-        with self.assertRaises(Problem) as e:
+        with self.assertRaises(app.Problem) as e:
             self.d.confirm("nope")
         self.assertEqual(e.exception.status, 404)
 
@@ -704,6 +704,17 @@ class FakeArchive:
         self.downloads += 1
         return self.xml
 
+    hathi = {"htid": "mdp.39015", "title": "The philosophy of the beautiful", "author": "Knight, William, 1836-1916.",
+             "year": "1891", "oclcs": ["123"], "rights": "pd", "volume": ""}
+    twins = [{"id": "ia:philosophy00knig", "oclc": True, "year": "1891"}]
+
+    def hathi_record(self, htid):
+        self.asked += 1
+        return dict(self.hathi)
+
+    def ia_twins(self, rec):
+        return list(self.twins)
+
 
 def make_scan(archive=None, redis=None):
     d, clock, _ = make()
@@ -714,6 +725,46 @@ def make_scan(archive=None, redis=None):
 
 
 class ScanTest(unittest.TestCase):
+    def test_hathitrust_book_opens_from_its_archive_copy(self):
+        d, _ = make_scan()
+        found = d.scan_find("hathi:mdp.39015")
+        self.assertEqual((found["id"], found["via"], found["ready"]), ("ia:philosophy00knig", "hathi:mdp.39015", False))
+        self.assertGreater(d.scan_preview("hathi:mdp.39015")["words"], 3000)
+        out = d.subscribe("me@example.com", found["id"], 10, "https://x")
+        self.assertEqual(out["status"], "sent")
+        again, _ = make_scan(redis=d.redis)
+        self.assertTrue(again.scan_find("hathi:mdp.39015")["ready"])
+        self.assertEqual(again.ia.asked, 0)
+
+    def test_hathitrust_rights_vouch_for_a_matching_copy(self):
+        late = FakeArchive(year="1941")                     # the Archive alone wouldn't send a 1941 book
+        late.hathi = {**late.hathi, "year": "1941"}
+        late.twins = [{"id": "ia:later00x", "oclc": False, "year": "1950"},   # another edition: not vouched for
+                      {"id": "ia:same00x", "oclc": False, "year": "1941"}]
+        d, _ = make_scan(late)
+        self.assertEqual(d.scan_find("hathi:mdp.39015")["id"], "ia:same00x")
+        with self.assertRaises(app.Problem):
+            d.scan_find("ia:later00x")
+
+    def test_hathitrust_book_not_public_domain_is_refused(self):
+        arch = FakeArchive()
+        arch.hathi = {**arch.hathi, "rights": "ic"}
+        d, _ = make_scan(arch)
+        with self.assertRaises(app.Problem) as e:
+            d.scan_find("hathi:mdp.39015")
+        self.assertIn("public domain", e.exception.message)
+        self.assertEqual(d.ia.downloads, 0)
+
+    def test_hathitrust_book_without_a_copy_is_refused_and_remembered(self):
+        arch = FakeArchive()
+        arch.twins = []
+        d, _ = make_scan(arch)
+        for _ in range(2):
+            with self.assertRaises(app.Problem) as e:
+                d.scan_find("hathi:mdp.39015")
+            self.assertEqual(e.exception.status, 422)
+        self.assertEqual(d.ia.asked, 1)
+
     def test_find_then_read_then_cached(self):
         d, _ = make_scan()
         found = d.scan_find("ia:philosophy00knig")
@@ -776,9 +827,9 @@ class ScanTest(unittest.TestCase):
             self.assertEqual(scan.short_title(long), short)
         self.assertEqual(scan.short_author("Oliphant, Mrs. (Margaret), 1828-1897"), "Mrs. Oliphant")
 
-    def test_only_archive_ids(self):
+    def test_only_scan_ids(self):
         d, _ = make_scan()
-        for bad in ("hathi:mdp.39015", "ia:../etc", "7", ""):
+        for bad in ("hathi:..\\x", "gutenberg:7", "ia:../etc", "7", ""):
             with self.assertRaises(app.Problem) as e:
                 d.scan_find(bad)
             self.assertEqual(e.exception.status, 400)

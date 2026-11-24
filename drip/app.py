@@ -6,6 +6,8 @@ State lives in Upstash Redis (REST API), email goes through Postmark:
   active                set of tokens that get a part every morning
   scan:{v}:ia:{id}      an Internet Archive scan read when a reader opened it: {title, author, year, blocks},
                         kept 90 days; scan-bad:{v}:ia:{id} says why one can't be read (7 days)
+  hathi-twin:{v}:hathi:{id}  the Archive copy we read for a HathiTrust book (90 days); scan-ok:{v}:ia:{id}
+                        marks a copy whose US rights HathiTrust vouched for
   blocks:{v}:{id}       a book as cut.py blocks (JSON, gzip, base64), read from Gutenberg's mirror:
                         the HTML edition, or the plain text when the HTML is missing or garbled.
                         v is READER: raise it when reading changes, so books are read again. Kept 90 days
@@ -63,6 +65,9 @@ EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SCAN_ID = re.compile(r"^(ia|hathi):[A-Za-z0-9._$:/+-]{1,120}$")   # a scanned book picked from search
 # An Internet Archive scan a reader can start at once: we read its OCR when they open it (Drip.scan).
 SCAN_LIVE = re.compile(r"^ia:[A-Za-z0-9._-]{1,100}$")
+# A HathiTrust book: read from the same scan on the Archive (Drip.hathi_twin).
+HATHI_ID = re.compile(r"^hathi:[A-Za-z0-9._$:/+-]{1,120}$")
+TWINS_TRIED = 4
 MAX_SCAN_XML = 40_000_000         # the OCR file, uncompressed: ~450,000 words; 17 MB (200,000) reads in ~5 s
 BAD_SCAN_SECONDS = 7 * 24 * 3600
 TIME_ZONE = re.compile(r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$")   # an IANA name like Europe/Lisbon
@@ -291,7 +296,7 @@ class Drip:
             info = self.ia.ia_files(scan_id[3:])
         except (OSError, ValueError, KeyError) as e:
             raise Problem(502, "The Internet Archive didn't answer. Try again in a minute.") from e
-        if not scan.us_public_domain(info):
+        if not scan.us_public_domain(info) and not self.redis("GET", f"scan-ok:{READER}:{scan_id}"):
             self.refuse(scan_id, "This scan may still be in copyright, so we can't send it yet. Request it and we'll check.")
         if not info.get("xml"):
             self.refuse(scan_id, "This scan has no text we can read. Request it and we'll look for another copy.")
@@ -336,9 +341,48 @@ class Drip:
         self._books[scan_id] = book
         return book
 
+    def hathi_twin(self, scan_id):
+        """'ia:<identifier>' for a HathiTrust book: the same scan on the Archive, which we can read. HathiTrust's
+        catalog tells us the book's US rights and OCLC numbers; when it says public domain and the Archive copy has
+        the same OCLC number or year, its word stands for the copy too (scan-ok), even if the Archive's doesn't."""
+        if not HATHI_ID.match(scan_id or ""):
+            raise Problem(400, "We can't read that scan here. Request it instead.")
+        key = f"hathi-twin:{READER}:{scan_id}"
+        twin = self.redis("GET", key)
+        if twin:
+            return twin
+        bad = self.redis("GET", f"scan-bad:{READER}:{scan_id}")
+        if bad:
+            raise Problem(422, bad)
+        try:
+            rec = self.ia.hathi_record(scan_id[6:])
+            twins = self.ia.ia_twins(rec)
+        except (OSError, ValueError, KeyError) as e:
+            raise Problem(502, "HathiTrust or the Internet Archive didn't answer. Try again in a minute.") from e
+        if rec["rights"] not in scan.HATHI_PD:
+            self.refuse(scan_id, "HathiTrust doesn't list this one as public domain in the US, so we can't send it yet. "
+                                 "Request it and we'll check.")
+        down = None
+        for t in twins[:TWINS_TRIED]:
+            if t["oclc"] or t["year"] == rec["year"]:
+                self.redis("SET", f"scan-ok:{READER}:{t['id']}", scan_id)
+            try:
+                self.scan_files(t["id"])
+            except Problem as e:
+                down = down or (e if e.status == 502 else None)
+                continue
+            self.redis("SET", key, t["id"], "EX", BLOCKS_DAYS * 86400)
+            return t["id"]
+        if down:
+            raise down
+        self.refuse(scan_id, "We couldn't find a copy of this scan that we can read. Request it and we'll look further.")
+
     def scan_find(self, scan_id):
         """The first, quick step of opening a scan: its preview if we've read it before, else its record and the
-        size of its OCR file, so the site can tell how long reading it will take."""
+        size of its OCR file, so the site can tell how long reading it will take. A HathiTrust book answers with
+        its Archive copy's id, which the site reads and starts."""
+        if HATHI_ID.match(scan_id or ""):
+            return {**self.scan_find(self.hathi_twin(scan_id)), "via": scan_id}
         if SCAN_LIVE.match(scan_id or "") and self.redis("GET", f"scan:{READER}:{scan_id}"):
             return {"ready": True, **self.scan_preview(scan_id)}
         info = self.scan_files(scan_id)
@@ -347,6 +391,8 @@ class Drip:
 
     def scan_preview(self, scan_id):
         """What the site shows before a reader starts a scan: how long it is at each pace, and part 1."""
+        if HATHI_ID.match(scan_id or ""):
+            scan_id = self.hathi_twin(scan_id)
         book = self.scan(scan_id)
         parts = {p: cut.cut_blocks(book["blocks"], p) for p in cut.PACES}
         first = parts[10][0]

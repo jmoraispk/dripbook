@@ -1,4 +1,6 @@
 """Reading a scanned book from the Internet Archive: its OCR (_djvu.xml) cleaned into cut.py blocks.
+A HathiTrust book is read from the same scan on the Archive (hathi_record, ia_twins): HathiTrust's own pages
+refuse scripts, but its catalog answers, with the book's OCLC numbers and US rights.
 
 The OCR knows the pages and lines, so the running heads, page numbers and Google's notices can be dropped,
 words broken at line ends joined, and garbled lines and smeared pages left out. Used by the sources tool
@@ -18,6 +20,10 @@ import cut
 UA = "dripbook/0.1 (+https://dripbook.ai)"
 IA_META = "https://archive.org/metadata/{id}"
 IA_FILE = "https://archive.org/download/{id}/{name}"
+IA_SEARCH = "https://archive.org/advancedsearch.php"
+HATHI_API = "https://catalog.hathitrust.org/api/volumes/full/htid/{id}.json"
+HATHI_PD = {"pd", "pdus"}        # public domain everywhere, or in the US
+MARC = "{http://www.loc.gov/MARC21/slim}"
 
 
 def get(url, params=None, timeout=60, raw=False):
@@ -442,3 +448,87 @@ def short_author(author):
         given = re.sub(r"\s*\([^)]*\)", "", bits[1]).strip() or bits[1].strip("()")
         a = given + " " + bits[0]
     return a.strip()
+
+
+# --- HathiTrust: the same book on the Archive ---------------------------------------------
+TITLE_SKIP = {"the", "and", "with", "for", "from", "being", "into", "its", "his", "her", "their", "our", "some"}
+
+
+def hathi_record(htid):
+    """HathiTrust's catalog record for one volume: {'htid', 'title', 'author', 'year', 'oclcs', 'rights', 'volume'}.
+    'rights' is HathiTrust's code: pd and pdus are public domain in the US."""
+    data = get(HATHI_API.format(id=urllib.parse.quote(htid, safe=":/$")), timeout=20)
+    item = next((i for i in data.get("items", []) if i.get("htid") == htid), None)
+    if not item:
+        raise ValueError("HathiTrust has no such volume.")
+    rec = data["records"].get(item.get("fromRecord")) or next(iter(data["records"].values()))
+    title, author = (rec.get("titles") or [""])[0], ""
+    try:
+        root = ET.fromstring(rec.get("marc-xml") or "<x/>")
+        def field(tag):
+            f = root.find(f".//{MARC}datafield[@tag='{tag}']/{MARC}subfield[@code='a']")
+            return (f.text or "").strip() if f is not None else ""
+        title = field("245") or title
+        author = field("100") or field("110") or field("111")
+    except ET.ParseError:
+        pass
+    return {"htid": htid, "title": title, "author": author, "year": str((rec.get("publishDates") or [""])[0])[:4],
+            "oclcs": [o for o in rec.get("oclcs", []) if o.isdigit()], "rights": item.get("rightsCode", ""),
+            "volume": item.get("enumcron") or ""}
+
+
+def title_words(title):
+    return [w for w in re.findall(r"[a-z]{3,}", short_title(title).lower()) if w not in TITLE_SKIP]
+
+
+def same_title(a, b):
+    """Most of each title's words in the other: 'Mademoiselle Ixe' and 'Mademoiselle Ixe / Lanoe Falconer'."""
+    wa, wb = set(title_words(a)), set(title_words(b))
+    return bool(wa and wb) and len(wa & wb) / len(wa | wb) >= 0.6
+
+
+def surname(author):
+    """'Knight, William Angus, 1836-1916.' -> 'knight'; 'William Knight' -> 'knight'."""
+    a = re.sub(r"\s*\(.*?\)|,?\s*\d.*$", "", (author or "").split(";")[0]).strip(" .,")
+    a = a.split(",")[0] if "," in a else (a.split() or [""])[-1]
+    return (re.findall(r"[A-Za-z]{3,}", a) or [""])[0].lower()
+
+
+def volume_number(v):
+    m = re.search(r"\d+", str(v or ""))
+    return int(m.group()) if m else None
+
+
+def ia_twins(rec, rows=20):
+    """Archive items that look like this HathiTrust book, best first: one with the same OCLC number, then the same
+    title and author (the same year first). Each {'id': 'ia:…', 'oclc': bool, 'year'}."""
+    words, last = title_words(rec["title"])[:6], surname(rec["author"])
+    ask = []
+    if rec["oclcs"]:
+        ask.append("oclc-id:(" + " OR ".join(rec["oclcs"][:10]) + ")")
+    if words:
+        ask.append("(title:(" + " ".join(words) + ")" + (f" AND creator:({last})" if last else "") + ")")
+    if not ask:
+        return []
+    docs = get(IA_SEARCH, {"q": "(" + " OR ".join(ask) + ") AND mediatype:texts", "rows": rows, "output": "json",
+                           "fl[]": ["identifier", "title", "creator", "date", "oclc-id", "volume"]},
+               timeout=20)["response"]["docs"]
+    vol = volume_number(rec["volume"])
+    out = []
+    for d in docs:
+        oclc = bool({str(o) for o in as_list(d.get("oclc-id"))} & set(rec["oclcs"]))
+        creator = "; ".join(map(str, as_list(d.get("creator"))))
+        title = str(as_list(d.get("title"))[0] if d.get("title") else "")
+        year = str(d.get("date", ""))[:4]
+        if not oclc and not (same_title(rec["title"], title) and (last in creator.lower() if last else year == rec["year"])):
+            continue
+        theirs = volume_number(d.get("volume"))
+        if vol and theirs and vol != theirs:
+            continue
+        out.append({"id": "ia:" + d["identifier"], "oclc": oclc, "year": year})
+    out.sort(key=lambda t: (not t["oclc"], t["year"] != rec["year"]))
+    return out
+
+
+def as_list(x):
+    return x if isinstance(x, list) else [] if x is None else [x]

@@ -246,7 +246,7 @@
       ['Your library', ids.length, 'to start now', 'lib'],
       ['Project Gutenberg', cat ? more.length : 'searching', 'to request', 'gut'],
       ['Internet Archive', f ? (Array.isArray(f.ia) ? found.ia.length : f.ia) : 'idle', 'to open', 'ia'],
-      ['HathiTrust', !HATHI ? 'off' : f ? (Array.isArray(f.hathi) ? found.hathi.length : f.hathi) : 'idle', 'to request', 'hathi']
+      ['HathiTrust', !HATHI ? 'off' : f ? (Array.isArray(f.hathi) ? found.hathi.length : f.hathi) : 'idle', 'to open', 'hathi']
     ], narrow));
     if (ids.length && show('lib')) {
       view.appendChild(el('h2', { class: 'hits-h' }, 'Start now'));
@@ -255,14 +255,14 @@
     if ((more.length && show('gut')) || (found.ia.length && show('ia')) || (found.hathi.length && show('hathi'))) {
       var sec = el('section', { class: 'asks' });
       sec.appendChild(el('h2', null, 'More books'));
-      sec.appendChild(el('p', null, 'We haven’t made these into drips yet. Open a scan from the Internet Archive to start it now, ' +
+      sec.appendChild(el('p', null, 'We haven’t made these into drips yet. Open a scan to start it now, ' +
         'or request any book and we’ll email you when it’s ready.'));
       scans = found.ia.concat(found.hathi);
       if (more.length && show('gut')) askList(sec, 'Project Gutenberg', null, more.map(function (b) {
         return { title: b[1], by: b[2], attr: 'data-ask', id: b[0] };
       }));
       if (found.ia.length && show('ia')) askList(sec, 'Internet Archive', 'Scanned pages: open one and we clean up its text in a few seconds, then you can start it.', found.ia.map(scanItem), found.copies.ia, q);
-      if (found.hathi.length && show('hathi')) askList(sec, 'HathiTrust', 'Scanned pages from university libraries. These take longest: we find a copy we can read, then clean it up.', found.hathi.map(scanItem), found.copies.hathi, q);
+      if (found.hathi.length && show('hathi')) askList(sec, 'HathiTrust', 'Scanned pages from university libraries: open one and we find the same scan on the Internet Archive, then clean up its text.', found.hathi.map(scanItem), found.copies.hathi, q);
       view.appendChild(sec);
     }
     var busy = !cat || (f && (f.ia === 'searching' || f.hathi === 'searching'));
@@ -299,6 +299,7 @@
       var n = r[1], state = typeof n === 'number' ? 'done' : n;
       var li = el('li', { class: state + (narrow && narrow !== r[3] ? ' dim' : '') });
       var label = el(state === 'done' && n ? 'button' : 'span', { class: 'source-name' });
+      label.appendChild(el('span', { class: 'src-icon', 'aria-hidden': 'true' }));   // inside, so a chosen library's ring holds it
       label.appendChild(el('b', null, r[0]));
       label.appendChild(document.createTextNode(
         state === 'done' ? (n ? n.toLocaleString('en') + ' ' + r[2] : 'none') :
@@ -310,7 +311,6 @@
         label.title = narrow === r[3] ? 'Show every library' : 'Show only ' + r[0];
         label.onclick = function () { only = narrow === r[3] ? '' : r[3]; showSearch(q); };
       }
-      li.appendChild(el('span', { class: 'src-icon', 'aria-hidden': 'true' }));
       li.appendChild(label);
       list.appendChild(li);
     });
@@ -521,7 +521,7 @@
     var v = volumeOf(r.title, r.volume);
     return { title: scanTitle(r.title).title, by: (v ? 'Volume ' + v + ' · ' : '') + [scanAuthor(r.author), r.year].filter(Boolean).join(', '),
              attr: 'data-scan', id: scans.indexOf(r), open: toolLink(r),
-             go: r.source.indexOf('ia:') === 0 ? 'Open' : 'Request' };
+             go: 'Open' };
   }
   // The sources tool's page for a scan: an Archive copy opens at once; a HathiTrust one first looks for the
   // same scan on the Archive.
@@ -675,19 +675,14 @@
       'We haven’t made this one into a drip yet. Request it and we’ll email you when it’s ready to start.');
   }
   // A scanned book: the same, with where the scan is.
-  // An Internet Archive scan is read and cleaned up there and then, with a bar while it is, and can start at once.
-  // A HathiTrust one, or an Archive one we can't read, is requested.
+  // It is read and cleaned up there and then, with a bar while it is, and can start at once. A HathiTrust book is
+  // read from the same scan on the Internet Archive. One we can't read is requested.
   function openScan(r) {
     var t = scanTitle(r.title), n = 0;
     for (var i = 0; i < r.source.length; i++) n = (n * 31 + r.source.charCodeAt(i)) % 9973;
     var sub = t.sub ? t.sub.replace(/^./, function (c) { return c.toUpperCase(); }) + '. ' : '';
     var from = 'A scan of the ' + (r.year ? r.year + ' ' : '') + 'printing, from ' + r.from + '. ';
     var book = { title: t.title, author: scanAuthor(r.author), source: r.source };
-    if (r.source.indexOf('ia:') !== 0) {
-      askWindow(book, n, sub + from + 'Scans need their text cleaned up before they read well, so this takes a little ' +
-        'longer. Request it and we’ll email you when it’s ready to start.', r.url);
-      return;
-    }
     askWindow(book, n, sub + from + 'We clean up the scanned text before you start.', r.url);
     readScan(book);
   }
@@ -712,9 +707,11 @@
     scanBits(true);
     $('#join').hidden = true;
     $('#dlg-prep').className = 'prep';
-    at(4, 'Finding the scan on the Internet Archive…');
+    var hathi = book.source.indexOf('hathi:') === 0;
+    at(4, hathi ? 'Finding the same scan on the Internet Archive…' : 'Finding the scan on the Internet Archive…');
     scanCall(book.source, 'find').then(function (f) {
       if (!live()) return;
+      if (f.via) book.source = f.id;      // a HathiTrust book: we read and start its Archive copy
       if (f.ready) return f;
       var mb = f.size / 1e6, secs = 1.5 + f.size / 4e6, t0 = Date.now();
       at(15, 'Reading ' + (mb >= 1 ? Math.round(mb) + ' MB' : 'the pages') + ' of scanned text…');

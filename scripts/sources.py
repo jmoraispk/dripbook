@@ -44,6 +44,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "drip"))
 import app  # noqa: E402
 import cut  # noqa: E402
+import scan  # noqa: E402
 from scan import (  # noqa: E402
     download_xml, garbled, ia_files, join_lines, running_head, scan_blocks, scan_pages)
 
@@ -308,6 +309,9 @@ class LocalArchive:
 
     def download_xml(self, identifier, info, timeout=60):
         return fetch_ia(identifier)[1]
+
+    hathi_record = staticmethod(scan.hathi_record)
+    ia_twins = staticmethod(scan.ia_twins)
 
 
 class MemoryRedis:

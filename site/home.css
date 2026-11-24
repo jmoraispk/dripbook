@@ -307,7 +307,8 @@ dialog::backdrop{background:rgba(4,7,14,.74);backdrop-filter:blur(3px)}
 .sources button.source-name[aria-pressed=true]{box-shadow:inset 0 0 0 1.5px var(--drop)}
 .sources button.source-name:focus-visible{outline:2px solid var(--drop);outline-offset:2px}
 .sources li.dim{opacity:.55}
-.sources li{display:flex;align-items:center;gap:8px}
+.sources li{display:flex;align-items:center}
+.sources .source-name{display:inline-flex;align-items:center;gap:8px}
 .src-icon{flex:none;width:12px;height:12px;box-sizing:border-box}
 .sources li.searching .src-icon{border:2px solid var(--rule);border-top-color:var(--drop);border-radius:50%;
   animation:src-spin .8s linear infinite}
