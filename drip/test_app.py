@@ -291,9 +291,8 @@ class RequestTest(unittest.TestCase):
         d, _, _ = make()
         out = d.request_book("Miss Marjoribanks", "Margaret Oliphant", "a@b.co", source="ia:missmarjoribanks00olip")
         self.assertIn("when Miss Marjoribanks is ready", out["message"])
-        d.request_book("Persuasion", "", "a@b.co", source="hathi:uc1.$b123456")
-        self.assertEqual([r.get("source") for r in self.saved(d)], ["ia:missmarjoribanks00olip", "hathi:uc1.$b123456"])
-        for bad in ("gutenberg:12", "ia:", "ia:a b", "ia:<x>", "ia:" + "x" * 121):
+        self.assertEqual([r.get("source") for r in self.saved(d)], ["ia:missmarjoribanks00olip"])
+        for bad in ("gutenberg:12", "hathi:uc1.$b123456", "ia:", "ia:a b", "ia:<x>", "ia:" + "x" * 121):
             with self.assertRaises(app.Problem):
                 d.request_book("Dune", "", "a@b.co", source=bad)
 
@@ -720,21 +719,19 @@ class FakeArchive:
         self.downloads += 1
         return self.xml
 
-    hathi = {"htid": "mdp.39015", "title": "The philosophy of the beautiful", "author": "Knight, William, 1836-1916.",
-             "year": "1891", "oclcs": ["123"], "rights": "pd", "volume": ""}
-    twins = [{"id": "ia:philosophy00knig", "oclc": True, "year": "1891"}]
+    hathi = ""                               # HathiTrust's word: 'pd', 'ic', '' (doesn't hold it) or an error to raise
+    hathi_asked = 0
 
     pdf = bytes(range(256)) * 40000          # about 10 MB
 
     def download_range(self, identifier, info, start, end, timeout=30):
         return self.pdf[start:end + 1]
 
-    def hathi_record(self, htid):
-        self.asked += 1
-        return dict(self.hathi)
-
-    def ia_twins(self, rec):
-        return list(self.twins)
+    def hathi_rights(self, oclcs, year=""):
+        self.hathi_asked += 1
+        if isinstance(self.hathi, Exception):
+            raise self.hathi
+        return self.hathi
 
 
 def make_scan(archive=None, redis=None):
@@ -787,7 +784,7 @@ class ScanTest(unittest.TestCase):
         self.assertEqual(len(out["starts"]), len(parts))
         self.assertEqual(out["blocks"][out["starts"][1]], list(parts[1][0]))
         self.assertTrue(all(k not in ("pg", "img") for k, _ in out["blocks"]))
-        kind, body = d.scan_api({"id": "hathi:mdp.39015", "step": "text"})
+        kind, body = d.scan_api({"id": "ia:philosophy00knig", "step": "text"})
         self.assertEqual(json.loads(body)["blocks"], out["blocks"])
 
     def test_pdf_comes_in_pieces(self):
@@ -809,45 +806,50 @@ class ScanTest(unittest.TestCase):
         with self.assertRaises(app.Problem):
             d2.scan_api({"id": "ia:philosophy00knig", "step": "pdf", "at": "0"})
 
-    def test_hathitrust_book_opens_from_its_archive_copy(self):
-        d, _ = make_scan()
-        found = d.scan_find("hathi:mdp.39015")
-        self.assertEqual((found["id"], found["via"], found["ready"]), ("ia:philosophy00knig", "hathi:mdp.39015", False))
-        self.assertGreater(d.scan_preview("hathi:mdp.39015")["words"], 3000)
-        out = d.subscribe("me@example.com", found["id"], 10, "https://x")
-        self.assertEqual(out["status"], "sent")
-        again, _ = make_scan(redis=d.redis)
-        self.assertTrue(again.scan_find("hathi:mdp.39015")["ready"])
-        self.assertEqual(again.ia.asked, 0)
-
-    def test_hathitrust_rights_vouch_for_a_matching_copy(self):
+    def test_hathitrust_vouches_for_a_later_printing(self):
         late = FakeArchive(year="1941")                     # the Archive alone wouldn't send a 1941 book
-        late.hathi = {**late.hathi, "year": "1941"}
-        late.twins = [{"id": "ia:later00x", "oclc": False, "year": "1950"},   # another edition: not vouched for
-                      {"id": "ia:same00x", "oclc": False, "year": "1941"}]
-        d, _ = make_scan(late)
-        self.assertEqual(d.scan_find("hathi:mdp.39015")["id"], "ia:same00x")
         with self.assertRaises(app.Problem):
-            d.scan_find("ia:later00x")
+            make_scan(late)[0].scan_find("ia:later00x")
+        late = FakeArchive(year="1941")
+        late.hathi = "pd"
+        self.assertEqual(make_scan(late)[0].scan_find("ia:later00x")["id"], "ia:later00x")
 
-    def test_hathitrust_book_not_public_domain_is_refused(self):
-        arch = FakeArchive()
-        arch.hathi = {**arch.hathi, "rights": "ic"}
+    def test_hathitrust_in_copyright_is_refused_whatever_the_archive_says(self):
+        arch = FakeArchive(rights="NOT_IN_COPYRIGHT")
+        arch.hathi = "ic"
         d, _ = make_scan(arch)
         with self.assertRaises(app.Problem) as e:
-            d.scan_find("hathi:mdp.39015")
-        self.assertIn("public domain", e.exception.message)
+            d.scan_find("ia:philosophy00knig")
+        self.assertIn("HathiTrust", e.exception.message)
         self.assertEqual(d.ia.downloads, 0)
 
-    def test_hathitrust_book_without_a_copy_is_refused_and_remembered(self):
+    def test_hathitrust_word_is_kept_but_silence_is_not(self):
         arch = FakeArchive()
-        arch.twins = []
+        arch.hathi = OSError("down")                       # no answer: the Archive's rules, and ask again next time
         d, _ = make_scan(arch)
-        for _ in range(2):
-            with self.assertRaises(app.Problem) as e:
-                d.scan_find("hathi:mdp.39015")
-            self.assertEqual(e.exception.status, 422)
-        self.assertEqual(d.ia.asked, 1)
+        d.scan_find("ia:philosophy00knig")
+        arch.hathi = ""
+        again, _ = make_scan(arch, redis=d.redis)
+        again.scan_find("ia:philosophy00knig")
+        third, _ = make_scan(arch, redis=d.redis)
+        third.scan_find("ia:philosophy00knig")
+        self.assertEqual(arch.hathi_asked, 2)
+
+    def test_hathi_rights_reads_the_catalog(self):
+        def catalog(records, items):
+            return lambda url, *a, **k: {"oclc:1;oclc:2": {"records": records, "items": items}}
+        two = {"r1": {"publishDates": ["1891"]}, "r2": {"publishDates": ["1950"]}}
+        items = [{"fromRecord": "r1", "rightsCode": "pd"}, {"fromRecord": "r2", "rightsCode": "ic"}]
+        real = scan.get
+        try:
+            for year, want in (("1891", "pd"), ("1950", "ic"), ("1700", "pd")):   # no record that year: any copy counts
+                scan.get = catalog(two, items)
+                self.assertEqual(scan.hathi_rights(["1", "2"], year), want, year)
+            scan.get = catalog([], [])                        # HathiTrust answers [] when it holds none
+            self.assertEqual(scan.hathi_rights(["1", "2"], "1891"), "")
+            self.assertEqual(scan.hathi_rights([], "1891"), "")
+        finally:
+            scan.get = real
 
     def test_find_then_read_then_cached(self):
         d, _ = make_scan()
@@ -913,7 +915,7 @@ class ScanTest(unittest.TestCase):
 
     def test_only_scan_ids(self):
         d, _ = make_scan()
-        for bad in ("hathi:..\\x", "gutenberg:999", "ia:../etc", "999", ""):
+        for bad in ("hathi:mdp.39015", "hathi:..\\x", "gutenberg:999", "ia:../etc", "999", ""):
             with self.assertRaises(app.Problem) as e:
                 d.scan_find(bad)
             self.assertEqual(e.exception.status, 400)

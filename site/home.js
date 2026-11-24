@@ -1,7 +1,6 @@
 // Dripbook home page: rows of covers, genres, search and the book window. Data: library.json (scripts/build_library.py)
 // and, once someone searches, catalog.json: the other Gutenberg books, which readers can request (scripts/build_catalog.py).
-// A search with nothing in either also looks through scanned books on the Internet Archive and HathiTrust, which
-// readers can request too.
+// A search with nothing in either also looks through scanned books on the Internet Archive, which readers can open too.
 (function () {
   'use strict';
 
@@ -25,14 +24,8 @@
   var catLoad = null;
   var SHOWN = 40;            // catalog matches listed at once
   var current = null;        // the book in the dialog: a library id, or {title, author, gutenberg | source} to request
-  // Scanned books. The Internet Archive answers the browser directly. HathiTrust's list is searched by
-  // scripts/sources.py, which runs only on our own machine for now, so the live site leaves it out.
+  // Scanned books: the Internet Archive answers the browser directly.
   var IA_SEARCH = 'https://archive.org/advancedsearch.php';
-  // HathiTrust: our copy of its public-domain list, as files on R2 read a slice at a time (scripts/hathi_search.py).
-  // Empty shows HathiTrust as coming soon. On this machine, the files the sources tool serves.
-  var HATHI_R2 = 'https://assets.dripbook.ai/hathi/';
-  var HATHI = /^(localhost|127\.|10\.|192\.168\.)/.test(location.hostname)
-    ? location.protocol + '//' + location.hostname + ':8765/hathi-search/' : HATHI_R2 || null;
   // Opening a scan (drip/app.py Drip.scan_find, scan_preview). On this machine, the sources tool's copy of it.
   var SCAN_API = /^(localhost|127\.|10\.|192\.168\.)/.test(location.hostname)
     ? location.protocol + '//' + location.hostname + ':8765/api/scan' : '/api/scan';
@@ -49,7 +42,7 @@
     return local ? 'http://' + location.hostname + ':8765/' : on ? 'http://localhost:8765/' : null;
   })();
   var entered = '';          // the query the reader pressed Enter on: search the scans without waiting
-  var far = {};              // a query's scan searches: {ia, hathi}, each 'searching', 'error', 'off' or a list
+  var far = {};              // a query's scan search: {q, ia}, ia 'searching', 'error' or a list
   var farTimer = null, farNext = '';
   var scans = [];            // the scans listed on screen, for their Request buttons
   var only = '', onlyFor = '';  // the one library the results are narrowed to ('' for all), and for which query
@@ -106,13 +99,11 @@
     next();
     return box;
   }
-  // Where each library keeps a book's cover. HathiTrust's sits behind Cloudflare's check, which may turn the browser
-  // away; then the book gets a cloth cover, as does any book whose library has none.
+  // Where each library keeps a book's cover. A book whose library has none gets a cloth cover.
   function coversOf(source) {
     var id = source.slice(source.indexOf(':') + 1);
     if (source.indexOf('gutenberg:') === 0) return ['https://www.gutenberg.org/cache/epub/' + id + '/pg' + id + '.cover.medium.jpg'];
     if (source.indexOf('ia:') === 0) return ['https://archive.org/services/img/' + encodeURIComponent(id)];
-    if (source.indexOf('hathi:') === 0) return ['https://babel.hathitrust.org/cgi/imgsrv/cover?id=' + encodeURIComponent(id) + ';width=250'];
     return [];
   }
   function cloth(id, b) {
@@ -258,10 +249,10 @@
       farTimer = setTimeout(function () { farNext = ''; if (search.value.trim().toLowerCase() === key) searchFar(q); },
                             entered === key ? 0 : 450);
     }
-    var f = far[key] || (farNext === key ? { ia: 'searching', hathi: HATHI ? 'searching' : 'off' } : null);
+    var f = far[key] || (farNext === key ? { ia: 'searching' } : null);
     var found = scanRows(f, ids, more);
     if (onlyFor !== key) { only = ''; onlyFor = key; }
-    var counts = { lib: ids.length, gut: more.length, ia: found.ia.length, hathi: found.hathi.length };
+    var counts = { lib: ids.length, gut: more.length, ia: found.ia.length };
     var narrow = only && counts[only] ? only : '';
     function show(k) { return !narrow || narrow === k; }
 
@@ -272,28 +263,26 @@
     view.appendChild(progress(q, f, [
       ['Your library', ids.length, 'to start now', 'lib'],
       ['Project Gutenberg', cat ? more.length : 'searching', 'to open', 'gut'],
-      ['Internet Archive', f ? (Array.isArray(f.ia) ? found.ia.length : f.ia) : 'idle', 'to open', 'ia'],
-      ['HathiTrust', !HATHI ? 'off' : f ? (Array.isArray(f.hathi) ? found.hathi.length : f.hathi) : 'idle', 'to open', 'hathi']
+      ['Internet Archive', f ? (Array.isArray(f.ia) ? found.ia.length : f.ia) : 'idle', 'to open', 'ia']
     ], narrow));
     if (ids.length && show('lib')) {
       view.appendChild(el('h2', { class: 'hits-h' }, 'Start now'));
       grid('Books to start now', ids);
     }
-    if ((more.length && show('gut')) || (found.ia.length && show('ia')) || (found.hathi.length && show('hathi'))) {
+    if ((more.length && show('gut')) || (found.ia.length && show('ia'))) {
       var sec = el('section', { class: 'asks' });
       sec.appendChild(el('h2', null, 'More books'));
       sec.appendChild(el('p', null, 'We haven’t made these into drips yet. Open one and we get it ready in a few seconds, ' +
         'so you can start it now.'));
-      scans = found.ia.concat(found.hathi);
+      scans = found.ia;
       if (more.length && show('gut')) askList(sec, 'Project Gutenberg', 'Clean text: open one and we cut it into parts in a second or two.', more.map(function (b) {
         return { title: b[1], by: b[2], attr: 'data-ask', id: b[0], color: b[0], covers: coversOf('gutenberg:' + b[0]) };
       }));
       if (found.ia.length && show('ia')) askList(sec, 'Internet Archive', 'Scanned pages: open one and we clean up its text in a few seconds, then you can start it.', found.ia.map(scanItem), found.copies.ia, q);
-      if (found.hathi.length && show('hathi')) askList(sec, 'HathiTrust', 'Scanned pages from university libraries: open one and we find the same scan on the Internet Archive, then clean up its text.', found.hathi.map(scanItem), found.copies.hathi, q);
       view.appendChild(sec);
     }
-    var busy = !cat || (f && (f.ia === 'searching' || f.hathi === 'searching'));
-    if (!busy && !ids.length && !more.length && !found.ia.length && !found.hathi.length) {
+    var busy = !cat || (f && f.ia === 'searching');
+    if (!busy && !ids.length && !more.length && !found.ia.length) {
       var p = el('p', { class: 'empty' },
         'No book or author matches “' + q.trim() + '”, here or in the libraries we search. Try a last name, like Austen or Tolstoy. If it’s an old book we should find, ');
       p.appendChild(el('a', { href: 'how.html#request' }, 'ask for it'));
@@ -348,22 +337,21 @@
         failed ? 'Search finished, but ' + plural(failed, 'library', 'libraries') + ' didn’t answer.' : 'Search complete.'));
     }
     if (!f && cat) {
-      var btn = el('button', { type: 'button', class: 'look-further' }, 'Search the Internet Archive' + (HATHI ? ' and HathiTrust' : '') + ' too');
+      var btn = el('button', { type: 'button', class: 'look-further' }, 'Search the Internet Archive too');
       btn.onclick = function () { searchFar(q); };
       box.appendChild(btn);
     }
     return box;
   }
 
-  // --- Scanned books: the Internet Archive and HathiTrust ------------------------------------
+  // --- Scanned books on the Internet Archive -------------------------------------------------
   function searchFar(q) {
     var key = q.trim().toLowerCase();
     if (far[key]) return;
-    var f = far[key] = { q: q, ia: 'searching', hathi: HATHI ? 'searching' : 'off' };
+    var f = far[key] = { q: q, ia: 'searching' };
     function again() { if (search.value.trim().toLowerCase() === key) showSearch(search.value); }
     again();
     searchArchive(q).then(function (rows) { f.ia = rows; }, function () { f.ia = 'error'; }).then(again);
-    if (HATHI) searchHathi(q).then(function (rows) { f.hathi = rows; }, function () { f.hathi = 'error'; }).then(again);
   }
   function fetchJson(url) {
     var stop = new AbortController(), t = setTimeout(function () { stop.abort(); }, 20000);
@@ -392,104 +380,22 @@
       });
     });
   }
-  // Every word but the small ones in the title or author, shortest titles first. Four rounds of requests:
-  // top.json (once), each word's dictionary block, each word's books, then those books' lines.
-  var hathiTop = null, HATHI_SKIP = /^(a|an|and|the|of|in|on|by|to|for|with|or|at|from|as|is)$/;
-  function hathiWords(s) {
-    var seen = {};
-    return (s.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '').match(/[\p{L}\p{N}]+/gu) || [])
-      .filter(function (w) { return !seen[w] && (seen[w] = 1); });
-  }
-  // len bytes at an offset in one of the three files, from the ~1 MB piece that holds them
-  // (top.pieces: where each piece starts). An index from before pieces is one file each.
-  function hathiSlice(top, kind, at, len) {
-    var starts = top.pieces && top.pieces[kind], file = { dict: 'dict.txt', postings: 'postings', rows: 'rows.txt' }[kind];
-    if (starts) {
-      var i = 0;
-      while (i + 2 < starts.length && starts[i + 1] <= at) i++;
-      file = kind + '-' + ('00' + i).slice(-3) + (kind === 'postings' ? '.bin' : '.txt');
-      len = Math.min(len, starts[i + 1] - at);
-      at -= starts[i];
-    }
-    var stop = new AbortController(), t = setTimeout(function () { stop.abort(); }, 20000);
-    // no-store: the browser would otherwise queue requests for parts of the same file one behind another
-    return fetch(HATHI + top.v + '/' + file, { cache: 'no-store', signal: stop.signal,
-                                               headers: { Range: 'bytes=' + at + '-' + (at + len - 1) } })
-      .then(function (r) {
-        if (r.status !== 206) { stop.abort(); throw new Error('No byte ranges: ' + r.status); }  // never the whole file
-        return r.arrayBuffer();
-      }).then(function (b) { clearTimeout(t); return new Uint8Array(b); },
-              function (e) { clearTimeout(t); throw e; });
-  }
-  function hathiIndex() {
-    if (!hathiTop) hathiTop = fetchJson(HATHI + 'top.json');
-    hathiTop.catch(function () { hathiTop = null; });
-    return hathiTop;
-  }
-  function searchHathi(q) {
-    var all = hathiWords(q), ws = all.filter(function (w) { return !HATHI_SKIP.test(w); });
-    if (!ws.length) ws = all;
-    if (!ws.length) return Promise.resolve([]);
-    var text = new TextDecoder();
-    return hathiIndex().then(function (top) {
-      return Promise.all(ws.map(function (w) {
-        var lo = 0, hi = top.words.length - 1;          // the last block starting at or before the word
-        while (lo < hi) { var m = (lo + hi + 1) >> 1; if (top.words[m] <= w) lo = m; else hi = m - 1; }
-        if (top.words[lo] > w) return null;
-        return hathiSlice(top, 'dict', top.at[lo], top.len[lo]).then(function (b) {
-          var line = text.decode(b).split('\n').filter(function (l) { return l.split('\t')[0] === w; })[0];
-          return line ? line.split('\t').map(Number) : null;      // [, books, offset, size]
-        });
-      })).then(function (found) {
-        if (found.some(function (x) { return !x; })) return [];
-        return Promise.all(found.map(function (x) {
-          return hathiSlice(top, 'postings', x[2], x[3]).then(hathiIds);
-        })).then(function (lists) {
-          var ids = lists.sort(function (a, b) { return a.length - b.length; }).reduce(hathiBoth).slice(0, 30);
-          return Promise.all(ids.map(function (at) {
-            return hathiSlice(top, 'rows', at, 1500).then(function (b) {
-              var x = text.decode(b).split('\n')[0].split('\t');   // htid, bib, year, pd, title, author
-              return { source: 'hathi:' + x[0], title: x[4], author: x[5], year: x[2] === '9999' ? '' : x[2],   // 9999: unknown
-                       url: 'https://catalog.hathitrust.org/Record/' + x[1], from: 'HathiTrust' };
-            });
-          }));
-        });
-      });
-    });
-  }
-  function hathiIds(b) {             // varint gaps -> sorted ids
-    var ids = [], n = 0, d = 0, shift = 0;
-    for (var i = 0; i < b.length; i++) {
-      d += (b[i] & 127) * Math.pow(2, shift);
-      if (b[i] & 128) shift += 7; else { n += d; ids.push(n); d = 0; shift = 0; }
-    }
-    return ids;
-  }
-  function hathiBoth(a, b) {         // ids in both sorted lists
-    var out = [], i = 0, j = 0;
-    while (i < a.length && j < b.length) {
-      if (a[i] < b[j]) i++; else if (a[i] > b[j]) j++; else { out.push(a[i]); i++; j++; }
-    }
-    return out;
-  }
   // A query's scans, with copies of the same book and books we already list taken out (unless the reader asked
-  // for every copy), and how many such copies each library had.
+  // for every copy), and how many such copies there were.
   function scanRows(f, ids, more) {
-    var out = { ia: [], hathi: [], copies: { ia: 0, hathi: 0 } };
+    var out = { ia: [], copies: { ia: 0 } };
     if (!f) return out;
     var known = {};
     ids.forEach(function (id) { known[sameBook(lib.books[id].title, lib.books[id].author)] = 1; });
     more.forEach(function (b) { known[sameBook(b[1], b[2])] = 1; });
-    ['ia', 'hathi'].forEach(function (k) {
-      if (!Array.isArray(f[k])) return;
-      f[k].forEach(function (r) {
-        var s = sameBook(r.title, r.author, r.volume);
-        if (!r.title) return;
-        if (known[s]) out.copies[k]++;
-        if (!known[s] || allCopies) { known[s] = 1; out[k].push(r); }
-      });
-      out[k] = ranked(out[k], f.q || '');
+    if (!Array.isArray(f.ia)) return out;
+    f.ia.forEach(function (r) {
+      var s = sameBook(r.title, r.author, r.volume);
+      if (!r.title) return;
+      if (known[s]) out.copies.ia++;
+      if (!known[s] || allCopies) { known[s] = 1; out.ia.push(r); }
     });
+    out.ia = ranked(out.ia, f.q || '');
     return out;
   }
   // The search's words as a phrase in the title first, then all of them in the title, then the rest
@@ -553,12 +459,9 @@
     for (var i = 0, n = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) % 9973;
     return n;
   }
-  // The sources tool's page for a scan: an Archive copy opens at once; a HathiTrust one first looks for the
-  // same scan on the Archive.
+  // The sources tool's page for a scan.
   function toolLink(r) {
-    if (!TOOL) return null;
-    return TOOL + '?' + new URLSearchParams(r.source.indexOf('ia:') === 0 ? { open: r.source }
-      : { title: r.title, author: r.author || '' });
+    return TOOL ? TOOL + '?' + new URLSearchParams({ open: r.source }) : null;
   }
   // One library's list, which the reader can fold away. A scan library says how many copies of books already listed it hid,
   // with a button to list them too.
@@ -708,8 +611,7 @@
     readScan(book);
   }
   // A scanned book: the same, with where the scan is.
-  // It is read and cleaned up there and then, with a bar while it is, and can start at once. A HathiTrust book is
-  // read from the same scan on the Internet Archive. One we can't read is requested.
+  // It is read and cleaned up there and then, with a bar while it is, and can start at once. One we can't read is requested.
   function openScan(r) {
     var t = scanTitle(r.title), n = hash(r.source);
     var sub = t.sub ? t.sub.replace(/^./, function (c) { return c.toUpperCase(); }) + '. ' : '';
@@ -747,12 +649,11 @@
     scanBits(true);
     $('#join').hidden = true;
     $('#dlg-prep').className = 'prep';
-    var hathi = book.source.indexOf('hathi:') === 0, gut = !!book.gutenberg;
-    at(4, gut ? 'Getting the book from Project Gutenberg…' : hathi ? 'Finding the same scan on the Internet Archive…'
-      : 'Finding the scan on the Internet Archive…');
+    var gut = !!book.gutenberg;
+    at(4, gut ? 'Getting the book from Project Gutenberg…' : 'Finding the scan on the Internet Archive…');
     scanCall(book.source, 'find').then(function (f) {
       if (!live()) return;
-      if (f.via || gut) book.source = f.id;   // a HathiTrust book's Archive copy, or a Gutenberg book's own id
+      if (gut) book.source = f.id;   // a Gutenberg book's own id
       if (f.ready) return f;
       var mb = f.size / 1e6, secs = f.secs || 1.5 + f.size / 4e6, t0 = Date.now();
       at(15, gut ? 'Reading the book…' : 'Reading ' + (mb >= 1 ? Math.round(mb) + ' MB' : 'the pages') + ' of scanned text…');
@@ -935,7 +836,6 @@
   // Someone who clicks into the box is about to search: fetch the lists it needs now.
   search.addEventListener('focus', function () {
     loadCatalog().catch(function () {});
-    if (HATHI) hathiIndex().catch(function () {});
   }, { once: true });
   document.addEventListener('keydown', function (e) {
     if (e.key === '/' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName) && !dialog.open) {

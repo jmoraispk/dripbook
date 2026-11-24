@@ -305,16 +305,15 @@ class LocalArchive:
     """The Archive for app.Drip, through the disk cache (fetch_ia)."""
     def ia_files(self, identifier):
         info, data = fetch_ia(identifier)
-        if "pdf_size" not in info:   # cached before we kept it
-            info.update({k: v for k, v in ia_files(identifier).items() if k in ("pdf", "pdf_size", "hosts")})
+        if "oclcs" not in info:      # cached before we kept these
+            info.update({k: v for k, v in ia_files(identifier).items() if k in ("pdf", "pdf_size", "hosts", "oclcs")})
         return {**info, "xml_size": info.get("xml_size") or len(data)}
 
     def download_xml(self, identifier, info, timeout=60):
         return fetch_ia(identifier)[1]
 
     download_range = staticmethod(scan.download_range)
-    hathi_record = staticmethod(scan.hathi_record)
-    ia_twins = staticmethod(scan.ia_twins)
+    hathi_rights = staticmethod(scan.hathi_rights)
 
 
 class MemoryRedis:
