@@ -89,16 +89,11 @@
     return box;
   }
   // A book from another library: its cover from there, or the next place's if that one has none, or a cloth cover.
-  // A tiny image (a library's 'no cover' pixel) counts as none. A function in the list looks up more places to try.
+  // A tiny image (a library's 'no cover' pixel) counts as none.
   function farArt(b, color, urls, eager) {
     var box = el('div', { class: 'art' }), i = 0;
-    urls = urls.slice();
     function next() {
       var url = urls[i++];
-      if (typeof url === 'function') {
-        url().then(function (more) { urls.splice.apply(urls, [i, 0].concat(more)); }, function () {}).then(next);
-        return;
-      }
       if (!url) { box.textContent = ''; box.appendChild(cloth(color, b)); return; }
       var img = el('img', { alt: '', decoding: 'async', referrerpolicy: 'no-referrer' });
       if (!eager) img.loading = 'lazy';
@@ -111,45 +106,14 @@
     next();
     return box;
   }
-  // Where each library keeps a book's cover. HathiTrust's sits behind a check that may turn the browser away.
-  function coversOf(source, title, author) {
+  // Where each library keeps a book's cover. HathiTrust's sits behind Cloudflare's check, which may turn the browser
+  // away; then the book gets a cloth cover, as does any book whose library has none.
+  function coversOf(source) {
     var id = source.slice(source.indexOf(':') + 1);
     if (source.indexOf('gutenberg:') === 0) return ['https://www.gutenberg.org/cache/epub/' + id + '/pg' + id + '.cover.medium.jpg'];
     if (source.indexOf('ia:') === 0) return ['https://archive.org/services/img/' + encodeURIComponent(id)];
-    if (source.indexOf('hathi:') === 0) return ['https://babel.hathitrust.org/cgi/imgsrv/cover?id=' + encodeURIComponent(id) + ';width=250',
-                                                function () { return sameEditionCovers(id); },
-                                                function () { return sameBookCovers(title, author); }];
+    if (source.indexOf('hathi:') === 0) return ['https://babel.hathitrust.org/cgi/imgsrv/cover?id=' + encodeURIComponent(id) + ';width=250'];
     return [];
-  }
-  // Any scan of the same title by the same author on the Archive, the most read first.
-  function sameBookCovers(title, author) {
-    var words = (fold(scanTitle(title || '').title).match(/[a-z0-9]+/g) || [])
-      .filter(function (w) { return !HATHI_SKIP.test(w); }).slice(0, 5);
-    var who = (fold(scanAuthor(author || '')).match(/[a-z]+/g) || []).pop();
-    if (!words.length || !who) return Promise.resolve([]);
-    var params = new URLSearchParams({ q: 'title:(' + words.join(' AND ') + ') AND creator:(' + who + ') AND mediatype:texts',
-                                       rows: '1', output: 'json' });
-    params.append('fl[]', 'identifier');
-    params.append('sort[]', 'downloads desc');
-    return fetchJson(IA_SEARCH + '?' + params).then(function (r) {
-      return r.response.docs.map(function (x) { return coversOf('ia:' + x.identifier)[0]; });
-    });
-  }
-  // A HathiTrust book's edition, by its OCLC numbers from HathiTrust's catalog: the same edition's scan on the
-  // Archive, then Open Library's cover of it.
-  function sameEditionCovers(htid) {
-    return fetchJson('https://catalog.hathitrust.org/api/volumes/brief/htid/' + encodeURIComponent(htid) + '.json').then(function (d) {
-      var oclcs = [];
-      for (var k in d.records || {}) oclcs = oclcs.concat(d.records[k].oclcs || []);
-      oclcs = oclcs.filter(function (n) { return /^\d+$/.test(n); }).slice(0, 5);
-      if (!oclcs.length) return [];
-      var library = oclcs.map(function (n) { return 'https://covers.openlibrary.org/b/oclc/' + n + '-M.jpg?default=false'; });
-      var params = new URLSearchParams({ q: 'oclc-id:(' + oclcs.join(' OR ') + ') AND mediatype:texts', rows: '2', output: 'json' });
-      params.append('fl[]', 'identifier');
-      return fetchJson(IA_SEARCH + '?' + params).then(function (r) {
-        return r.response.docs.map(function (x) { return coversOf('ia:' + x.identifier)[0]; }).concat(library);
-      }, function () { return library; });
-    });
   }
   function cloth(id, b) {
     b = b || lib.books[id];
@@ -583,7 +547,7 @@
   function scanItem(r) {
     var v = volumeOf(r.title, r.volume);
     return { title: scanTitle(r.title).title, by: (v ? 'Volume ' + v + ' · ' : '') + [scanAuthor(r.author), r.year].filter(Boolean).join(', '),
-             attr: 'data-scan', id: scans.indexOf(r), open: toolLink(r), color: hash(r.source), covers: coversOf(r.source, r.title, r.author) };
+             attr: 'data-scan', id: scans.indexOf(r), open: toolLink(r), color: hash(r.source), covers: coversOf(r.source) };
   }
   function hash(s) {                 // a steady number for a string, to pick a cloth colour
     for (var i = 0, n = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) % 9973;
@@ -750,7 +714,7 @@
     var t = scanTitle(r.title), n = hash(r.source);
     var sub = t.sub ? t.sub.replace(/^./, function (c) { return c.toUpperCase(); }) + '. ' : '';
     var from = 'A scan of the ' + (r.year ? r.year + ' ' : '') + 'printing, from ' + r.from + '. ';
-    var book = { title: t.title, author: scanAuthor(r.author), source: r.source, covers: coversOf(r.source, r.title, r.author) };
+    var book = { title: t.title, author: scanAuthor(r.author), source: r.source };
     askWindow(book, n, sub + from + 'We clean up the scanned text before you start.', r.url);
     readScan(book);
   }
@@ -789,7 +753,6 @@
     scanCall(book.source, 'find').then(function (f) {
       if (!live()) return;
       if (f.via || gut) book.source = f.id;   // a HathiTrust book's Archive copy, or a Gutenberg book's own id
-      if (f.via) dialogArt(book, coversOf(f.id));   // the same scan's cover; HathiTrust's may have been turned away
       if (f.ready) return f;
       var mb = f.size / 1e6, secs = f.secs || 1.5 + f.size / 4e6, t0 = Date.now();
       at(15, gut ? 'Reading the book…' : 'Reading ' + (mb >= 1 ? Math.round(mb) + ' MB' : 'the pages') + ' of scanned text…');
@@ -852,7 +815,7 @@
   function askWindow(book, color, blurb, link) {
     current = book;
     book.color = color;
-    dialogArt(book, book.covers || coversOf(book.source));
+    dialogArt(book, coversOf(book.source));
     $('#dlg-title').textContent = book.title;
     $('#dlg-by').textContent = book.author;
     $('#dlg-tags').textContent = '';
