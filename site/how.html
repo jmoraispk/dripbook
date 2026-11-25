@@ -27,7 +27,7 @@
     </a>
     <nav class="bar-links" aria-label="Main">
       <a href="/">Library</a>
-      <a href="how.html" aria-current="page">How it works</a>
+      <a href="how.html" class="how-link" aria-current="page"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.2v11.6l9.5-5.8z" fill="currentColor"/></svg>How it works</a>
     </nav>
   </div>
 </header>
@@ -36,6 +36,12 @@
   <section class="how-intro">
     <h1>How Dripbook works</h1>
     <p class="lede">Pick a book and a pace. Every morning, the next short part arrives in your inbox, until you've read every word.</p>
+    <figure class="how-video" id="video">
+      <video controls playsinline preload="none" width="1920" height="1080" poster="video/dripbook-demo-poster.jpg" aria-label="Dripbook in 30 seconds">
+        <source src="video/dripbook-demo.mp4" type="video/mp4">
+      </video>
+      <figcaption>Dripbook in 30 seconds. The words are on screen, so it works with the sound off.</figcaption>
+    </figure>
     <ol class="how-steps">
       <li><h2>Pick a book</h2><p>Start any book in the library, bring your own PDF, or ask for one we don't have yet.</p></li>
       <li><h2>Choose your pace</h2><p>Five, ten or twenty minutes a day, at the hour you like. Change it whenever you want.</p></li>

@@ -222,6 +222,9 @@ dialog::backdrop{background:rgba(4,7,14,.74);backdrop-filter:blur(3px)}
 .bar-links{display:flex;gap:clamp(14px,2vw,26px);font-size:.9375rem;flex:none}
 .bar-links a{color:var(--muted);text-decoration:none}
 .bar-links a:hover,.bar-links a[aria-current="page"]{color:var(--text)}
+/* "How it works" is in the logo's gold, with a play mark: the page opens on the demo video */
+.bar-links a.how-link{color:var(--drop);font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.bar-links a.how-link:hover{color:color-mix(in srgb,var(--drop) 75%,#fff)}
 .page .bar-links{margin-left:auto}
 @media (max-width:760px){.bar .bar-links{margin-left:auto}}
 
@@ -229,6 +232,9 @@ dialog::backdrop{background:rgba(4,7,14,.74);backdrop-filter:blur(3px)}
 .how{max-width:1120px;margin:0 auto;padding:clamp(24px,5vw,56px) var(--gutter) 20px}
 .how h1{font:600 clamp(2.1rem,5vw,3.4rem)/1.08 var(--serif)}
 .how .lede{margin-top:14px;font-size:1.1875rem;color:var(--muted);max-width:46ch}
+.how-video{margin:clamp(24px,4vw,36px) 0 0}
+.how-video video{display:block;width:100%;height:auto;aspect-ratio:16/9;border-radius:14px;background:var(--night-2);border:1px solid var(--rule)}
+.how-video figcaption{margin-top:10px;font-size:.9375rem;color:var(--muted)}
 .how-steps{list-style:none;counter-reset:step;margin:clamp(28px,4vw,44px) 0 0;padding:0;display:grid;
   grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
 .how-steps li{counter-increment:step;padding:20px 20px 22px;border-radius:12px;background:var(--night-2);border:1px solid var(--rule)}
