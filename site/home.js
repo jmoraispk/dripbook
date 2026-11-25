@@ -1,6 +1,6 @@
 // Dripbook home page: rows of covers, genres, search and the book window. Data: library.json (scripts/build_library.py)
-// and, once someone searches, catalog.json: the other Gutenberg books, which readers can request (scripts/build_catalog.py).
-// A search with nothing in either also looks through scanned books on the Internet Archive, which readers can open too.
+// and, once someone searches, catalog.json: the other Gutenberg books, which readers can open too (scripts/build_catalog.py).
+// Every search also looks through scanned books on the Internet Archive, which readers can open as well.
 (function () {
   'use strict';
 
@@ -242,8 +242,8 @@
       return words.every(function (w) { return hay.indexOf(w) >= 0; });
     });
     var more = cat ? findInCatalog(words) : [];
-    // Nothing here or on Gutenberg: look through the scans once the reader stops typing, or at once after Enter.
-    if (cat && !ids.length && !more.length && !far[key] && farNext !== key) {
+    // Look through the scans too, once the reader stops typing, or at once after Enter.
+    if (cat && !far[key] && farNext !== key) {
       clearTimeout(farTimer);
       farNext = key;
       farTimer = setTimeout(function () { farNext = ''; if (search.value.trim().toLowerCase() === key) searchFar(q); },
@@ -335,11 +335,6 @@
       var failed = rows.filter(function (r) { return r[1] === 'error'; }).length;
       box.appendChild(el('p', { class: 'sources-done' + (failed ? ' partly' : ''), role: 'status' },
         failed ? 'Search finished, but ' + plural(failed, 'library', 'libraries') + ' didn’t answer.' : 'Search complete.'));
-    }
-    if (!f && cat) {
-      var btn = el('button', { type: 'button', class: 'look-further' }, 'Search the Internet Archive too');
-      btn.onclick = function () { searchFar(q); };
-      box.appendChild(btn);
     }
     return box;
   }
@@ -848,7 +843,6 @@
 
   fetch('library.json').then(function (r) { return r.json(); }).then(function (data) {
     lib = data;
-    search.placeholder = 'Search ' + lib.total.toLocaleString('en') + ' books and authors';
     buildChips();
     if (!/^#(book|request)\//.test(location.hash)) lastView = location.hash;
     route();
