@@ -137,7 +137,7 @@ def make(env=None, page=None):
             raise OSError("404")
         return page
     d = Drip(FakeRedis(), FakeMail(), env=env or {}, fetch=fetch, library=LIBRARY,
-             clock=lambda: clock.now, day=lambda: clock.date, fetch_html=fetch_html,
+             clock=lambda: clock.now, day=lambda: clock.date, fetch_html=fetch_html, size=lambda book_id: 340_000,
              catalog={"77": {"title": "A Book Outside the Library", "author": "Someone Long Dead"},
                       "78": {"title": "Only Music", "author": ""}})
     return d, clock, fetched

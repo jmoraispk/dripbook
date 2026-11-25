@@ -651,10 +651,18 @@
       if (gut) book.source = f.id;   // a Gutenberg book's own id
       if (f.ready) return f;
       var mb = f.size / 1e6, secs = f.secs || 1.5 + f.size / 4e6, t0 = Date.now();
-      at(15, gut ? 'Reading the book…' : 'Reading ' + (mb >= 1 ? Math.round(mb) + ' MB' : 'the pages') + ' of scanned text…');
+      var size = mb >= 1 ? Math.round(mb) + ' MB' : mb >= 0.1 ? mb.toFixed(1) + ' MB' : '';
+      at(15, gut ? 'Downloading the book' + (size ? ' (' + size + ')' : '') + ' from Project Gutenberg…'
+                 : 'Reading ' + (size || 'the pages') + ' of scanned text…');
+      // Downloading takes nearly all the time; cleaning up and cutting take a second or two at the end. Past the
+      // estimate, say so plainly rather than sit on one step.
       prepTimer = setInterval(function () {
         var x = (Date.now() - t0) / 1000 / secs;
-        at(15 + 77 * (1 - Math.exp(-2.2 * x)), x < 0.55 ? null : x < 1 ? 'Cleaning up the text…' : 'Cutting it into parts…');
+        at(15 + 77 * (1 - Math.exp(-2.2 * x)),
+           gut ? (x < 0.85 ? null : x < 1.5 ? 'Cleaning it up and cutting it into parts…'
+                                            : 'Still downloading. Long books take a while from Project Gutenberg.')
+               : (x < 0.55 ? null : x < 1 ? 'Cleaning up the text…' : x < 1.6 ? 'Cutting it into parts…'
+                                          : 'Still working. Long scans take a little longer.'));
       }, 200);
       return scanCall(book.source, 'read');
     }).then(function (p) {

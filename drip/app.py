@@ -38,6 +38,7 @@ import secrets
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -186,6 +187,23 @@ def fetch_gutenberg_html(book_id):
     return fetch_gutenberg(book_id, MIRROR_HTML)
 
 
+GUTENBERG_RATE = 170_000   # bytes a second, about what Gutenberg's mirror sends one download at a time
+
+
+def gutenberg_size(book_id):
+    """Bytes in the larger of a book's text and HTML editions, asked of the mirror (0 when it won't say). The two
+    are downloaded side by side, so the larger one decides how long opening the book takes."""
+    def head(url):
+        try:
+            req = urllib.request.Request(url.format(id=book_id), method="HEAD", headers={"User-Agent": "dripbook/0.1"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return int(resp.headers.get("Content-Length") or 0)
+        except (OSError, ValueError):
+            return 0
+    with ThreadPoolExecutor(2) as pool:
+        return max(pool.map(head, (MIRROR, MIRROR_HTML)))
+
+
 def read_book(text, page=None):
     """A book's blocks: from its HTML edition (page) when that reads cleanly, else from the text."""
     plain = cut.paragraphs(cut.clean(text))
@@ -220,8 +238,9 @@ def today():
 # --- The drip ---------------------------------------------------------------------------
 class Drip:
     def __init__(self, redis, mail, env=None, fetch=fetch_gutenberg, library=None, clock=time.time, day=today,
-                 fetch_html=fetch_gutenberg_html, blob=None, ia=scan, catalog=None):
+                 fetch_html=fetch_gutenberg_html, blob=None, ia=scan, catalog=None, size=gutenberg_size):
         self.redis, self.mail, self.fetch, self.fetch_html, self.blob = redis, mail, fetch, fetch_html, blob
+        self.size = size   # gutenberg_size, or a fake in tests
         self.ia = ia   # ia_files(identifier) and download_xml(identifier, info): scan.py, or a fake in tests
         self.env = os.environ if env is None else env
         self.library = load_library() if library is None else library
@@ -287,12 +306,16 @@ class Drip:
         if raw:
             blocks = [tuple(b) for b in unpack(raw)]
         else:
+            # The text and the HTML edition side by side: the mirror is slow (a long book takes 20 s), so this halves the wait.
+            pool = ThreadPoolExecutor(1)
+            html_job = pool.submit(self.fetch_html, book_id) if self.fetch_html else None
+            pool.shutdown(wait=False)   # if the text fails, don't wait for the HTML to answer
             try:
                 text = self.fetch(book_id)
             except (OSError, ValueError) as e:
                 raise Problem(502, "We couldn't load this book just now. Try again in a minute.") from e
             try:
-                page = self.fetch_html(book_id) if self.fetch_html else None
+                page = html_job.result() if html_job else None
             except (OSError, ValueError):
                 page = None
             blocks = read_book(text, page)
@@ -389,8 +412,9 @@ class Drip:
             if g in self._books or self.redis("GET", f"blocks:{READER}:{g}"):
                 return {"ready": True, **self.scan_preview(g)}
             info = self.library.get(g) or self.catalog[g]
+            size = self.size(g)
             return {"ready": False, "id": g, "title": info["title"], "author": info.get("author", ""), "year": "",
-                    "size": 0, "secs": 3}
+                    "size": size, "secs": round(1.5 + size / GUTENBERG_RATE, 1) if size else 3}
         if SCAN_LIVE.match(scan_id or "") and self.redis("GET", f"scan:{READER}:{scan_id}"):
             return {"ready": True, **self.scan_preview(scan_id)}
         info = self.scan_files(scan_id)
