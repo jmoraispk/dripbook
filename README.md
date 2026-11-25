@@ -12,6 +12,8 @@ Pick a classic, choose a reading pace, and get the next part by email. Authors c
 
 ## From book to inbox
 
+[![Dripbook’s reader library with featured classics and book covers](docs/images/dripbook-library.png)](https://dripbook.ai)
+
 | Choose your reading pace | Edit the lesson breaks |
 | --- | --- |
 | [![Dripbook’s book signup with reading pace options](docs/images/dripbook-reading-pace.png)](https://dripbook.ai/#book/98) | [![Dripbook’s cut editor showing the start and end of a lesson in a sample PDF](docs/images/dripbook-cut-editor.png)](https://dripbook.ai/cuts) |
