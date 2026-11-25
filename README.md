@@ -6,7 +6,7 @@ Read a book in daily installments, right from your inbox.
 
 [![Watch the 30-second Dripbook demo, with sound](docs/images/dripbook-demo-video.jpg)](https://youtu.be/jLlsHZCnHLE)
 
-▶ [Watch the 30-second demo on YouTube](https://youtu.be/jLlsHZCnHLE), with sound. It also plays on [How it works](https://dripbook.ai/how), and the file is [site/video/dripbook-demo.mp4](site/video/dripbook-demo.mp4).
+▶ [Watch the 30-second demo on YouTube](https://youtu.be/jLlsHZCnHLE), with sound. It also plays on [How it works](https://dripbook.ai/how), and the file is [dripbook-demo.mp4](https://assets.dripbook.ai/video/dripbook-demo.mp4).
 
 Pick a classic, choose a reading pace, and get the next part by email. Authors can turn their own ebooks into paid email courses.
 

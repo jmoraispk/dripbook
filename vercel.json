@@ -7,7 +7,7 @@
   "functions": {
     "api/*.py": {
       "includeFiles": "{drip/*.py,site/library.json,site/catalog.json}",
-      "excludeFiles": "{converter,discovery,payments-spike,public-domain,email-spike,scripts,docs,design-options,site/covers,site/demo-*,site/video,site/think-python*}/**",
+      "excludeFiles": "{converter,discovery,payments-spike,public-domain,email-spike,scripts,docs,design-options,site/covers,site/demo-*,site/think-python*}/**",
       "maxDuration": 60
     }
   },
