@@ -231,10 +231,9 @@ dialog::backdrop{background:rgba(4,7,14,.74);backdrop-filter:blur(3px)}
 /* How it works page */
 .how{max-width:1120px;margin:0 auto;padding:clamp(24px,5vw,56px) var(--gutter) 20px}
 .how h1{font:600 clamp(2.1rem,5vw,3.4rem)/1.08 var(--serif)}
-.how .lede{margin-top:14px;font-size:1.1875rem;color:var(--muted);max-width:46ch}
+.how .lede{margin-top:14px;font-size:1.1875rem;color:var(--muted)}
 .how-video{margin:clamp(24px,4vw,36px) 0 0}
 .how-video video{display:block;width:100%;height:auto;aspect-ratio:16/9;border-radius:14px;background:var(--night-2);border:1px solid var(--rule)}
-.how-video figcaption{margin-top:10px;font-size:.9375rem;color:var(--muted)}
 .how-steps{list-style:none;counter-reset:step;margin:clamp(28px,4vw,44px) 0 0;padding:0;display:grid;
   grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
 .how-steps li{counter-increment:step;padding:20px 20px 22px;border-radius:12px;background:var(--night-2);border:1px solid var(--rule)}
